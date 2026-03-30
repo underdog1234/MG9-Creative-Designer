@@ -1,0 +1,179 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>YES TECH LED Layout Designer</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="panel">
+          <p class="eyebrow">YES TECH Layout Tool</p>
+          <h1>MG9 Creative Designer</h1>
+          <p class="intro">
+            Build stock-aware lettering and custom layouts with MG9 square panels, MG12 triangle
+            panels, and MG13 quarter-circle panels.
+          </p>
+        </div>
+
+        <div class="panel">
+          <h2>Selected Panel</h2>
+          <div id="selectedMeta" class="selected-meta empty">Select a panel on the canvas.</div>
+          <div class="controls-stack">
+            <button id="rotateBtn" class="secondary-btn" type="button">Rotate 90 deg</button>
+            <button id="duplicateBtn" class="secondary-btn" type="button">Duplicate</button>
+            <button id="deleteBtn" class="danger-btn" type="button">Delete</button>
+          </div>
+          <p class="microcopy">
+            Panels need two edge connector matches. Unavailable stock is shown in grey.
+          </p>
+        </div>
+
+        <div class="panel">
+          <div class="section-heading">
+            <h2>Inventory</h2>
+            <button id="resetInventoryBtn" class="secondary-btn" type="button">Reset Used</button>
+          </div>
+          <div id="inventoryList" class="inventory-list"></div>
+        </div>
+
+        <div class="panel">
+          <div class="section-heading">
+            <h2>Panel Library</h2>
+            <button id="clearLayoutBtn" class="danger-btn" type="button">Clear Layout</button>
+          </div>
+          <p class="microcopy">
+            Click a panel to add it. New panels auto-attach to the selected layout when possible.
+          </p>
+          <div id="library" class="library-grid"></div>
+        </div>
+
+        <div class="panel">
+        <div class="section-heading">
+          <h2>Text Layout</h2>
+          <span class="pill">Live sizing</span>
+        </div>
+        <label class="field">
+          <span>Word, phrase, emoji, or sample sheet</span>
+          <textarea id="textInput" rows="5" maxlength="160">123456789
+ABCDEFGHI
+JKLMNOPQR
+STUVWXYZ</textarea>
+        </label>
+          <div class="two-col">
+            <label class="field">
+              <span>Target height (m)</span>
+              <input id="heightMetersInput" type="number" min="0.5" max="100" step="0.5" value="2.5" />
+            </label>
+            <label class="field">
+              <span>Actual width (m)</span>
+              <input id="actualWidthOutput" type="text" value="0.0" readonly />
+            </label>
+          </div>
+          <div class="two-col">
+            <label class="field">
+              <span>Spacing (m)</span>
+              <input id="spacingInput" type="number" min="0" max="10" step="0.5" value="0.5" />
+            </label>
+            <label class="field">
+              <span>Style</span>
+              <select id="letterStyleInput">
+                <option value="mixed">Mixed creative</option>
+                <option value="rect">MG9 only</option>
+              </select>
+            </label>
+          </div>
+          <div id="textSummary" class="summary-chip">Live layout ready.</div>
+          <div class="controls-stack">
+            <button id="generateTextBtn" class="primary-btn" type="button">Refresh Layout</button>
+            <button id="loadReferenceBtn" class="secondary-btn" type="button">Load Reference Sheet</button>
+          </div>
+          <p class="microcopy">
+            Height updates the layout live. Width is worked out from the chosen letters. Edit
+            `glyph-library.js` to fine-tune any character.
+          </p>
+        </div>
+
+      </aside>
+
+      <main class="workspace">
+        <div class="toolbar">
+          <div class="metrics">
+            <div class="metric">
+              <span class="metric-label">Layout width</span>
+              <strong id="layoutWidth">0 m</strong>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Layout height</span>
+              <strong id="layoutHeight">0 m</strong>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Panels used</span>
+              <strong id="panelCount">0</strong>
+            </div>
+            <div class="metric">
+              <span class="metric-label">Connection status</span>
+              <strong id="connectionStatus">Ready</strong>
+            </div>
+          </div>
+          <div class="toolbar-actions">
+            <button id="zoomOutBtn" class="secondary-btn" type="button">-</button>
+            <span id="zoomLabel" class="zoom-label">100%</span>
+            <button id="zoomInBtn" class="secondary-btn" type="button">+</button>
+          </div>
+        </div>
+
+        <div class="canvas-wrap">
+          <svg id="layoutCanvas" viewBox="0 0 2400 1600" aria-label="LED layout canvas">
+            <defs>
+              <pattern id="gridPattern" width="125" height="125" patternUnits="userSpaceOnUse">
+                <path d="M 125 0 L 0 0 0 125" fill="none" />
+              </pattern>
+              <pattern id="subGridPattern" width="25" height="25" patternUnits="userSpaceOnUse">
+                <path d="M 25 0 L 0 0 0 25" fill="none" />
+              </pattern>
+              <marker id="arrowMarker" markerWidth="12" markerHeight="12" refX="6" refY="6" orient="auto">
+                <path d="M 0 0 L 12 6 L 0 12 z" class="marker-fill"></path>
+              </marker>
+            </defs>
+            <rect id="canvasBackground" class="canvas-bg" x="0" y="0" width="2400" height="1600"></rect>
+            <rect id="canvasSubgrid" class="canvas-subgrid" x="0" y="0" width="2400" height="1600"></rect>
+            <rect id="canvasGrid" class="canvas-grid" x="0" y="0" width="2400" height="1600"></rect>
+            <g id="canvasGuides"></g>
+            <g id="canvasPanels"></g>
+          </svg>
+        </div>
+      </main>
+    </div>
+
+    <template id="inventoryRowTemplate">
+      <div class="inventory-row">
+        <div>
+          <strong class="inventory-name"></strong>
+          <p class="inventory-size"></p>
+        </div>
+        <label class="inventory-input">
+          <span>Stock</span>
+          <input type="number" min="0" step="1" />
+        </label>
+        <div class="inventory-counts">
+          <span class="used-count"></span>
+          <span class="remaining-count"></span>
+        </div>
+      </div>
+    </template>
+
+    <template id="libraryCardTemplate">
+      <button class="library-card" type="button">
+        <span class="library-shape"></span>
+        <strong class="library-name"></strong>
+        <span class="library-dimensions"></span>
+      </button>
+    </template>
+
+    <script src="./glyph-library.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
