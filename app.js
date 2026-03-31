@@ -104,11 +104,15 @@ const state = {
   inventory: { ...defaultInventory },
   panels: [],
   selectedId: null,
+  selectedIds: [],
   zoom: 1,
   drag: null,
   nextId: 1,
   connectionMap: new Map(),
   autoTextTimer: null,
+  history: [],
+  currentViewBox: "0 0 2400 1600",
+  manualViewLocked: false,
 };
 
 const els = {
@@ -137,6 +141,7 @@ const els = {
   rotateBtn: document.querySelector("#rotateBtn"),
   duplicateBtn: document.querySelector("#duplicateBtn"),
   deleteBtn: document.querySelector("#deleteBtn"),
+  undoBtn: document.querySelector("#undoBtn"),
   clearLayoutBtn: document.querySelector("#clearLayoutBtn"),
   resetInventoryBtn: document.querySelector("#resetInventoryBtn"),
   zoomInBtn: document.querySelector("#zoomInBtn"),
@@ -290,6 +295,37 @@ function getPanelById(id) {
   return state.panels.find((panel) => panel.id === id);
 }
 
+function getSelectedPanels() {
+  const ids = new Set(state.selectedIds.length ? state.selectedIds : state.selectedId ? [state.selectedId] : []);
+  return state.panels.filter((panel) => ids.has(panel.id));
+}
+
+function snapshotState() {
+  return {
+    inventory: { ...state.inventory },
+    panels: state.panels.map((panel) => ({ ...panel })),
+    selectedId: state.selectedId,
+    selectedIds: [...state.selectedIds],
+  };
+}
+
+function pushHistory() {
+  state.history.push(snapshotState());
+  if (state.history.length > 100) state.history.shift();
+}
+
+function undoLastAction() {
+  const snapshot = state.history.pop();
+  if (!snapshot) return;
+  state.inventory = { ...snapshot.inventory };
+  state.panels = snapshot.panels.map((panel) => ({ ...panel }));
+  state.selectedId = snapshot.selectedId;
+  state.selectedIds = [...snapshot.selectedIds];
+  applyAvailability();
+  computeConnections();
+  render();
+}
+
 function getUsedCounts() {
   return state.panels.reduce((counts, panel) => {
     counts[panel.type] = (counts[panel.type] || 0) + 1;
@@ -365,47 +401,78 @@ function isPanelConnected(panelId) {
 }
 
 function addPanel(type) {
+  pushHistory();
+  state.manualViewLocked = true;
   const panel = findPlacementForNewPanel(type);
   state.panels.push(panel);
   applyAvailability();
   state.selectedId = panel.id;
+  state.selectedIds = [panel.id];
   computeConnections();
   render();
 }
 
 function removeSelectedPanel() {
-  if (!state.selectedId) return;
-  state.panels = state.panels.filter((panel) => panel.id !== state.selectedId);
+  const selectedIds = new Set(getSelectedPanels().map((panel) => panel.id));
+  if (!selectedIds.size) return;
+  pushHistory();
+  state.manualViewLocked = true;
+  state.panels = state.panels.filter((panel) => !selectedIds.has(panel.id));
   applyAvailability();
   state.selectedId = null;
+  state.selectedIds = [];
   computeConnections();
   render();
 }
 
 function duplicateSelectedPanel() {
-  const selected = getPanelById(state.selectedId);
-  if (!selected) return;
-
-  const duplicate = findPlacementForNewPanel(selected.type, selected.rotation);
-  state.panels.push(duplicate);
+  const selectedPanels = getSelectedPanels();
+  if (!selectedPanels.length) return;
+  pushHistory();
+  state.manualViewLocked = true;
+  const duplicates = selectedPanels.map((selected, index) =>
+    createPanel(selected.type, selected.x + PANEL_SIZE_UNITS, selected.y + index * HALF_PANEL, selected.rotation)
+  );
+  state.panels.push(...duplicates);
   applyAvailability();
-  state.selectedId = duplicate.id;
+  state.selectedId = duplicates[0]?.id || null;
+  state.selectedIds = duplicates.map((panel) => panel.id);
   computeConnections();
   render();
 }
 
 function rotateSelectedPanel() {
-  const selected = getPanelById(state.selectedId);
-  if (!selected) return;
-
-  selected.rotation = (selected.rotation + ROTATION_STEP) % 360;
-  snapPanel(selected);
+  const selectedPanels = getSelectedPanels();
+  if (!selectedPanels.length) return;
+  pushHistory();
+  state.manualViewLocked = true;
+  selectedPanels.forEach((selected) => {
+    selected.rotation = (selected.rotation + ROTATION_STEP) % 360;
+  });
   computeConnections();
   render();
 }
 
-function setSelected(id) {
-  state.selectedId = id;
+function setSelected(id, options = {}) {
+  const { additive = false, toggle = false } = options;
+  const selected = new Set(state.selectedIds);
+
+  if (toggle && selected.has(id)) selected.delete(id);
+  else if (additive || toggle) selected.add(id);
+  else {
+    selected.clear();
+    selected.add(id);
+  }
+
+  state.selectedIds = [...selected];
+  state.selectedId = state.selectedIds[0] || null;
+  renderSelectedMeta();
+  renderCanvas();
+}
+
+function clearSelection() {
+  state.selectedId = null;
+  state.selectedIds = [];
   renderSelectedMeta();
   renderCanvas();
 }
@@ -514,6 +581,7 @@ function renderCanvas() {
     const classes = [
       "panel-group",
       panel.id === state.selectedId ? "selected" : "",
+      state.selectedIds.includes(panel.id) && panel.id !== state.selectedId ? "multi-selected" : "",
       panel.available === false ? "unavailable" : "",
       !isConnected ? "disconnected" : "",
     ]
@@ -531,7 +599,10 @@ function renderCanvas() {
     group.addEventListener("pointerdown", onPanelPointerDown);
     group.addEventListener("click", (event) => {
       event.stopPropagation();
-      setSelected(panel.id);
+      setSelected(panel.id, {
+        additive: event.shiftKey || event.ctrlKey || event.metaKey,
+        toggle: event.ctrlKey || event.metaKey,
+      });
     });
 
     els.canvasPanels.appendChild(group);
@@ -590,12 +661,17 @@ function getLayoutBounds() {
 }
 
 function updateCanvasView(bounds) {
+  if (state.drag || (state.manualViewLocked && state.panels.length)) {
+    els.canvas.setAttribute("viewBox", state.currentViewBox);
+    return;
+  }
   const width = Math.max(bounds.width + CANVAS_PADDING * 2, 2400);
   const height = Math.max(bounds.height + CANVAS_PADDING * 2, 1600);
   const x = bounds.hasPanels ? bounds.minX - CANVAS_PADDING : 0;
   const y = bounds.hasPanels ? bounds.minY - CANVAS_PADDING : 0;
 
-  els.canvas.setAttribute("viewBox", `${x} ${y} ${width} ${height}`);
+  state.currentViewBox = `${x} ${y} ${width} ${height}`;
+  els.canvas.setAttribute("viewBox", state.currentViewBox);
   els.canvasBackground.setAttribute("x", x);
   els.canvasBackground.setAttribute("y", y);
   els.canvasBackground.setAttribute("width", width);
@@ -681,10 +757,20 @@ function updateMetrics() {
 }
 
 function renderSelectedMeta() {
+  const selectedPanels = getSelectedPanels();
   const panel = getPanelById(state.selectedId);
-  if (!panel) {
+  if (!panel || !selectedPanels.length) {
     els.selectedMeta.classList.add("empty");
     els.selectedMeta.textContent = "Select a panel on the canvas.";
+    return;
+  }
+
+  if (selectedPanels.length > 1) {
+    els.selectedMeta.classList.remove("empty");
+    els.selectedMeta.innerHTML = `
+      <strong>${selectedPanels.length} panels selected</strong><br />
+      Move, rotate, duplicate, or delete them as one group.
+    `;
     return;
   }
 
@@ -730,27 +816,40 @@ function onPanelPointerDown(event) {
   const panel = getPanelById(group.dataset.id);
   if (!panel) return;
 
-  setSelected(panel.id);
+  if (!state.selectedIds.includes(panel.id)) {
+    setSelected(panel.id, {
+      additive: event.shiftKey || event.ctrlKey || event.metaKey,
+      toggle: event.ctrlKey || event.metaKey,
+    });
+  }
+  pushHistory();
+  state.manualViewLocked = true;
   const pointer = screenToSvg(event);
+  const selectedPanels = getSelectedPanels();
   state.drag = {
-    panelId: panel.id,
-    offsetX: pointer.x - panel.x,
-    offsetY: pointer.y - panel.y,
-    originalX: panel.x,
-    originalY: panel.y,
-    originalRotation: panel.rotation,
+    panelIds: selectedPanels.map((item) => item.id),
+    originPointerX: pointer.x,
+    originPointerY: pointer.y,
+    originalPanels: selectedPanels.map((item) => ({
+      id: item.id,
+      x: item.x,
+      y: item.y,
+      rotation: item.rotation,
+    })),
   };
 }
 
 function onCanvasPointerMove(event) {
   if (!state.drag) return;
-  const panel = getPanelById(state.drag.panelId);
-  if (!panel) return;
-
   const pointer = screenToSvg(event);
-  panel.x = pointer.x - state.drag.offsetX;
-  panel.y = pointer.y - state.drag.offsetY;
-  snapPanel(panel);
+  const dx = pointer.x - state.drag.originPointerX;
+  const dy = pointer.y - state.drag.originPointerY;
+  state.drag.originalPanels.forEach((original) => {
+    const panel = getPanelById(original.id);
+    if (!panel) return;
+    panel.x = original.x + dx;
+    panel.y = original.y + dy;
+  });
   computeConnections();
   renderCanvas();
   renderSelectedMeta();
@@ -758,20 +857,13 @@ function onCanvasPointerMove(event) {
 
 function onCanvasPointerUp() {
   if (!state.drag) return;
-  const panel = getPanelById(state.drag.panelId);
-
-  if (panel) {
-    snapPanel(panel);
-    computeConnections();
-
-    if (!isLayoutValid()) {
-      panel.x = state.drag.originalX;
-      panel.y = state.drag.originalY;
-      panel.rotation = state.drag.originalRotation;
-      snapPanel(panel);
-      computeConnections();
-    }
-  }
+  state.drag.panelIds.forEach((panelId) => {
+    const panel = getPanelById(panelId);
+    if (!panel) return;
+    panel.x = snapToIncrement(panel.x, HALF_PANEL);
+    panel.y = snapToIncrement(panel.y, HALF_PANEL);
+  });
+  computeConnections();
 
   state.drag = null;
   render();
@@ -785,8 +877,7 @@ function onCanvasClick(event) {
     event.target.classList.contains("canvas-subgrid");
 
   if (isBackground) {
-    state.selectedId = null;
-    render();
+    clearSelection();
   }
 }
 
@@ -855,16 +946,22 @@ function findPlacementForNewPanel(type, rotation = 0) {
 }
 
 function clearLayout() {
+  pushHistory();
+  state.manualViewLocked = false;
   state.panels = [];
   state.selectedId = null;
+  state.selectedIds = [];
   applyAvailability();
   computeConnections();
   render();
 }
 
 function resetInventoryUsed() {
+  pushHistory();
+  state.manualViewLocked = false;
   state.panels = [];
   state.selectedId = null;
+  state.selectedIds = [];
   state.inventory = { ...defaultInventory };
   applyAvailability();
   computeConnections();
@@ -1209,6 +1306,7 @@ function buildLibraryGlyphPanels(lines, targetHeightPanels, spacingPanels, style
     generatedPanels: panels,
     targetWidthPanels: maxWidth || 1,
     targetHeightPanels: cursorRow || 5 * scale,
+    fromLibrary: true,
   };
 }
 
@@ -1262,6 +1360,7 @@ function buildTextPanels() {
     generatedPanels,
     targetWidthPanels,
     targetHeightPanels,
+    fromLibrary: false,
   };
 }
 
@@ -1339,9 +1438,11 @@ function updateTextSummary(generatedPanels, targetWidthPanels, targetHeightPanel
   els.textSummary.textContent = `Height ${mmToMetersText(targetHeightPanels * PANEL_SIZE_MM)}. Actual ${mmToMetersText(widthMm)} x ${mmToMetersText(heightMm)}.${stockText}`;
 }
 
-function generateTextLayout(showAlerts = false) {
-  const { generatedPanels, targetWidthPanels, targetHeightPanels } = buildTextPanels();
-  const optimizedPanels = optimizeGeneratedPanels(generatedPanels);
+function generateTextLayout(showAlerts = false, recordHistory = true) {
+  if (recordHistory) pushHistory();
+  state.manualViewLocked = false;
+  const { generatedPanels, targetWidthPanels, targetHeightPanels, fromLibrary } = buildTextPanels();
+  const optimizedPanels = fromLibrary ? generatedPanels : optimizeGeneratedPanels(generatedPanels);
   const stockCheck = checkStockForGeneratedPanels(optimizedPanels);
   updateTextSummary(optimizedPanels, targetWidthPanels, targetHeightPanels, stockCheck);
 
@@ -1355,13 +1456,14 @@ function generateTextLayout(showAlerts = false) {
   state.panels = optimizedPanels.map((panel) => createPanel(panel.type, panel.x, panel.y, panel.rotation));
   applyAvailability();
   state.selectedId = state.panels[0]?.id || null;
+  state.selectedIds = state.selectedId ? [state.selectedId] : [];
   computeConnections();
   render();
 }
 
 function scheduleAutoGenerate() {
   clearTimeout(state.autoTextTimer);
-  state.autoTextTimer = setTimeout(() => generateTextLayout(false), AUTO_REFRESH_DELAY_MS);
+  state.autoTextTimer = setTimeout(() => generateTextLayout(false, false), AUTO_REFRESH_DELAY_MS);
 }
 
 function clearAndResetInventory() {
@@ -1390,6 +1492,7 @@ function wireEvents() {
     els.textInput.value = REFERENCE_SAMPLE_TEXT;
     generateTextLayout(false);
   });
+  els.undoBtn.addEventListener("click", undoLastAction);
   els.rotateBtn.addEventListener("click", rotateSelectedPanel);
   els.duplicateBtn.addEventListener("click", duplicateSelectedPanel);
   els.deleteBtn.addEventListener("click", removeSelectedPanel);
@@ -1405,6 +1508,10 @@ function wireEvents() {
   });
 
   window.addEventListener("keydown", (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
+      event.preventDefault();
+      undoLastAction();
+    }
     if (event.key === "Delete") removeSelectedPanel();
     if (event.key.toLowerCase() === "r") rotateSelectedPanel();
   });
