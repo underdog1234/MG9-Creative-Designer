@@ -145,8 +145,8 @@ const els = {
   libraryCardTemplate: document.querySelector("#libraryCardTemplate"),
 };
 
-const HORIZONTAL_EDGE_CONNECTORS = [-0.8, -0.4, 0, 0.4, 0.8].map((value) => value * HALF_PANEL);
-const VERTICAL_EDGE_CONNECTORS = [-0.5, 0, 0.5].map((value) => value * HALF_PANEL);
+const EDGE_CONNECTORS_5 = [-0.8, -0.4, 0, 0.4, 0.8].map((value) => value * HALF_PANEL);
+const EDGE_CONNECTORS_3 = [-0.5, 0, 0.5].map((value) => value * HALF_PANEL);
 const TEMPLATE_RESOLUTION = 16;
 
 function mmToUnits(mm) {
@@ -190,12 +190,12 @@ function getGraphemes(text) {
 function buildConnectorGrid() {
   const anchors = [];
 
-  HORIZONTAL_EDGE_CONNECTORS.forEach((x) => {
+  EDGE_CONNECTORS_3.forEach((x) => {
     anchors.push({ x, y: -HALF_PANEL });
     anchors.push({ x, y: HALF_PANEL });
   });
 
-  VERTICAL_EDGE_CONNECTORS.forEach((y) => {
+  EDGE_CONNECTORS_5.forEach((y) => {
     anchors.push({ x: -HALF_PANEL, y });
     anchors.push({ x: HALF_PANEL, y });
   });
@@ -206,21 +206,21 @@ function buildConnectorGrid() {
 const SHARED_CONNECTORS = buildConnectorGrid();
 
 function triangleEdgeConnectors() {
-  const diagonal = [-0.8, -0.4, 0, 0.4, 0.8].map((value) => ({
-    x: value * HALF_PANEL,
-    y: value * HALF_PANEL,
+  const diagonal = EDGE_CONNECTORS_5.map((value) => ({
+    x: value,
+    y: value,
   }));
   return [
-    ...VERTICAL_EDGE_CONNECTORS.map((y) => ({ x: -HALF_PANEL, y })),
-    ...HORIZONTAL_EDGE_CONNECTORS.map((x) => ({ x, y: HALF_PANEL })),
+    ...EDGE_CONNECTORS_5.map((y) => ({ x: -HALF_PANEL, y })),
+    ...EDGE_CONNECTORS_5.map((x) => ({ x, y: HALF_PANEL })),
     ...diagonal,
   ];
 }
 
 function sectorEdgeConnectors() {
   return [
-    ...HORIZONTAL_EDGE_CONNECTORS.map((x) => ({ x, y: HALF_PANEL })),
-    ...VERTICAL_EDGE_CONNECTORS.map((y) => ({ x: HALF_PANEL, y })),
+    ...EDGE_CONNECTORS_5.map((x) => ({ x, y: HALF_PANEL })),
+    ...EDGE_CONNECTORS_5.map((y) => ({ x: HALF_PANEL, y })),
   ];
 }
 
@@ -1151,6 +1151,23 @@ function chooseCreativeType(cell, cellSet, style) {
   return { type: "MG9", rotation: 0 };
 }
 
+function normalizeGlyphEntry(entry) {
+  if (Array.isArray(entry)) {
+    const width = Math.max(...entry.map((row) => row.length));
+    const panels = [];
+
+    entry.forEach((row, rowIndex) => {
+      [...row].forEach((token, colIndex) => {
+        if (token !== ".") panels.push({ token, x: colIndex, y: rowIndex });
+      });
+    });
+
+    return { width, height: entry.length, panels };
+  }
+
+  return entry;
+}
+
 function buildLibraryGlyphPanels(lines, targetHeightPanels, spacingPanels, style) {
   const scale = Math.max(1, Math.round(targetHeightPanels / 5));
   const lineGapPanels = Math.max(1, Math.round(scale * 1.5));
@@ -1162,29 +1179,24 @@ function buildLibraryGlyphPanels(lines, targetHeightPanels, spacingPanels, style
     let cursorCol = 0;
 
     graphemes.forEach((glyph, glyphIndex) => {
-      const rows = GLYPH_LIBRARY[glyph.toUpperCase()];
-      const width = Math.max(...rows.map((row) => row.length));
+      const glyphEntry = normalizeGlyphEntry(GLYPH_LIBRARY[glyph.toUpperCase()]);
 
-      rows.forEach((row, rowIndex) => {
-        [...row].forEach((token, colIndex) => {
-          if (token === ".") return;
+      glyphEntry.panels.forEach((cell) => {
+        const mapped = style === "rect" ? GLYPH_TOKEN_MAP.S : GLYPH_TOKEN_MAP[cell.token] || GLYPH_TOKEN_MAP.S;
 
-          const mapped = style === "rect" ? GLYPH_TOKEN_MAP.S : GLYPH_TOKEN_MAP[token] || GLYPH_TOKEN_MAP.S;
-
-          for (let scaleY = 0; scaleY < scale; scaleY += 1) {
-            for (let scaleX = 0; scaleX < scale; scaleX += 1) {
-              panels.push({
-                type: mapped.type,
-                rotation: mapped.rotation,
-                x: 500 + (cursorCol + colIndex * scale + scaleX) * PANEL_SIZE_UNITS,
-                y: 500 + (cursorRow + rowIndex * scale + scaleY) * PANEL_SIZE_UNITS,
-              });
-            }
+        for (let scaleY = 0; scaleY < scale; scaleY += 1) {
+          for (let scaleX = 0; scaleX < scale; scaleX += 1) {
+            panels.push({
+              type: mapped.type,
+              rotation: mapped.rotation,
+              x: 500 + (cursorCol + cell.x * scale + scaleX) * PANEL_SIZE_UNITS,
+              y: 500 + (cursorRow + cell.y * scale + scaleY) * PANEL_SIZE_UNITS,
+            });
           }
-        });
+        }
       });
 
-      cursorCol += width * scale;
+      cursorCol += glyphEntry.width * scale;
       if (glyphIndex < graphemes.length - 1) cursorCol += spacingPanels;
     });
 

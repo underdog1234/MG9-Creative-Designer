@@ -1,5 +1,7 @@
 // Hand-authored 5-panel-high glyph library.
 // Edit these rows directly to tune the lettering against the YES TECH sample sheet.
+// Simple glyphs use string rows. Tricky glyphs can use explicit panel coordinates:
+// { width, height, panels: [{ token, x, y }] } where x/y are in panel units and can use 0.5 offsets.
 //
 // Token legend:
 // . = empty
@@ -34,25 +36,34 @@ window.GLYPH_LIBRARY = {
   "0": ["aSSb", "S..S", "S..S", "S..S", "dSSc"],
   "1": ["S", "S", "S", "S", "S"],
   "2": ["SSSb", "..Sc", ".SS.", "S...", "dSSS"],
-  "3": ["SSSb", "..S.", ".SSc", "..S.", "dSSc"],
+  "3": ["SSSb", "..S.", ".SS.", "..S.", "dSSc"],
   "4": ["S..S", "S..S", "dSSc", "...S", "...S"],
   "5": ["aSSS", "S...", "dSSb", "...S", "dSSc"],
   "6": ["aSSb", "S...", "aSSb", "S..S", "dSSc"],
-  "7": ["SSSb", "..S.", ".S..", "S...", "...."],
+  "7": {
+    width: 2.5,
+    height: 5,
+    panels: [
+      { token: "S", x: 1.5, y: 0 },
+      { token: "S", x: 1.0, y: 1 },
+      { token: "S", x: 0.5, y: 2 },
+      { token: "S", x: 0.0, y: 3 },
+    ],
+  },
   "8": ["aSSb", "S..S", "dSSc", "S..S", "dSSc"],
   "9": ["aSSb", "S..S", "dSSc", "...S", "dSSc"],
-  A: ["aSb", "S.S", "SSS", "S.S", "S.S"],
+  A: ["aSSb", "S..S", "SSSS", "S..S", "S..S"],
   B: ["SSSb", "S..S", "SSSc", "S..S", "dSSc"],
-  C: ["aSS", "S..", "S..", "S..", "dSS"],
+  C: ["aSSS", "S...", "S...", "S...", "dSSS"],
   D: ["SSSb", "S..S", "S..S", "S..S", "dSSc"],
   E: ["SSSC", "S...", "SSS.", "S...", "SSSD"],
   F: ["SSSC", "S...", "SSC.", "S...", "S..."],
   G: ["aSSb", "S...", "S.Sb", "S..S", "dSSc"],
-  H: ["S..S", "S..S", "dSSc", "S..S", "S..S"],
-  I: ["S", "S", "S", "S", "S"],
-  J: ["..S", "..S", "..S", "S.S", "dSc"],
+  H: ["S..S", "S..S", "SSSS", "S..S", "S..S"],
+  I: ["SSS", ".S.", ".S.", ".S.", "SSS"],
+  J: ["..S", "..S", "..S", "..S", "dSS"],
   K: ["S..C", "S.B.", "SS..", "S.D.", "S..A"],
-  L: ["S...", "S...", "S...", "S...", "dSSb"],
+  L: ["S...", "S...", "S...", "S...", "dSSS"],
   M: ["S.B.S", "SBASB", "S.A.S", "S...S", "S...S"],
   N: ["SB..S", "S.B.S", "S..BS", "S...S", "S...S"],
   O: ["aSSb", "S..S", "S..S", "S..S", "dSSc"],
@@ -60,12 +71,23 @@ window.GLYPH_LIBRARY = {
   Q: ["aSSb", "S..S", "S..S", "S..S", "dSSD"],
   R: ["aSSb", "S..S", "dSSc", "S..B", "S...A"],
   S: ["aSSb", "S...", "dSSb", "...S", "dSSc"],
-  T: ["SSS", ".S.", ".S.", ".S.", ".S."],
+  T: ["SSSS", ".SS.", ".SS.", ".SS.", ".SS."],
   U: ["S..S", "S..S", "S..S", "S..S", "dSSc"],
   V: ["S...S", "S...S", ".S.S.", ".B.D.", "..A.."],
   W: ["S...S", "S...S", "S.A.S", "SB.BS", "S...S"],
   X: ["B...C", ".B.D.", "..A..", ".B.D.", "A...D"],
-  Y: ["S...S", ".S.S.", "..S..", "..S..", "..S.."],
-  Z: ["SSSC", "..B.", ".S..", "B...", "DSSS"],
+  Y: {
+    width: 2.5,
+    height: 5,
+    panels: [
+      { token: "S", x: 0.5, y: 0 },
+      { token: "S", x: 1.5, y: 0 },
+      { token: "S", x: 1.0, y: 1 },
+      { token: "S", x: 1.0, y: 2 },
+      { token: "S", x: 1.0, y: 3 },
+      { token: "S", x: 1.0, y: 4 },
+    ],
+  },
+  Z: ["SSSC", "..S.", ".S..", "S...", "DSSS"],
   " ": ["..", "..", "..", "..", ".."],
 };
