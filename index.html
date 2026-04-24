@@ -27,8 +27,7 @@
             <span class="section-toggle-icon">−</span>
           </button>
           <div class="section-body" data-section-body="textLayout">
-            <div class="section-heading">
-              <h2>Text Layout</h2>
+            <div class="section-heading no-title">
               <span class="pill">Live sizing</span>
             </div>
             <label class="field">
@@ -126,11 +125,33 @@ STUVWXYZ</textarea>
             <span class="section-toggle-icon">+</span>
           </button>
           <div class="section-body" data-section-body="inventory" hidden>
-            <div class="section-heading">
-              <h2>Inventory</h2>
+            <div class="section-heading no-title">
               <button id="resetInventoryBtn" class="secondary-btn" type="button">Reset Used</button>
             </div>
             <div id="inventoryList" class="inventory-list"></div>
+          </div>
+        </section>
+
+        <section class="panel section-panel is-collapsed" data-section-key="help">
+          <button class="section-toggle" type="button" data-section-toggle="help" aria-expanded="false">
+            <span>Help & Shortcuts</span>
+            <span class="section-toggle-icon">+</span>
+          </button>
+          <div class="section-body" data-section-body="help" hidden>
+            <div class="shortcut-list">
+              <div><strong>Esc</strong><span>Cancel placement mode</span></div>
+              <div><strong>R</strong><span>Rotate selected panels</span></div>
+              <div><strong>D</strong><span>Duplicate selected panels</span></div>
+              <div><strong>Delete</strong><span>Delete selected panels</span></div>
+              <div><strong>Ctrl/Cmd + Z</strong><span>Undo</span></div>
+              <div><strong>Ctrl/Cmd + S</strong><span>Save project JSON</span></div>
+              <div><strong>Ctrl/Cmd + O</strong><span>Open project JSON</span></div>
+              <div><strong>Ctrl/Cmd + P</strong><span>Save PDF</span></div>
+              <div><strong>G</strong><span>Refresh text layout</span></div>
+              <div><strong>1 / 2 / 3</strong><span>Arm MG9 / MG12 / MG13 placement</span></div>
+              <div><strong>Shift-click</strong><span>Add to selection</span></div>
+              <div><strong>Ctrl/Cmd-click</strong><span>Toggle selection</span></div>
+            </div>
           </div>
         </section>
 

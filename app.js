@@ -5,6 +5,7 @@ const PANEL_SIZE_MM = 500;
 const PANEL_SIZE_UNITS = PANEL_SIZE_MM * MM_TO_UNITS;
 const HALF_PANEL = PANEL_SIZE_UNITS / 2;
 const SNAP_DISTANCE_UNITS = 8;
+const PLACEMENT_LOCK_DISTANCE = 52;
 const ROTATION_STEP = 90;
 const CANVAS_PADDING = 180;
 const AUTO_REFRESH_DELAY_MS = 120;
@@ -120,6 +121,7 @@ const state = {
     selectedPanel: false,
     panelLibrary: true,
     inventory: true,
+    help: true,
   },
   placement: {
     active: false,
@@ -195,6 +197,11 @@ function sanitizeProjectName(name) {
     .replace(/[<>:"/\\|?*\x00-\x1F]/g, "-")
     .replace(/\s+/g, " ");
   return cleaned || "untitled-layout";
+}
+
+function isTypingTarget(target) {
+  if (!(target instanceof HTMLElement)) return false;
+  return Boolean(target.closest("input, textarea, select, [contenteditable='true']"));
 }
 
 function snapToIncrement(value, increment) {
@@ -678,9 +685,22 @@ function createAnchors(panel, geometry) {
   return fragment;
 }
 
+function createPreviewAnchors(panel, geometry, connectedIndices = new Set()) {
+  const fragment = document.createDocumentFragment();
+  geometry.anchors.forEach((anchor, index) => {
+    const circle = document.createElementNS(SVG_NS, "circle");
+    circle.setAttribute("cx", panel.x + anchor.x);
+    circle.setAttribute("cy", panel.y + anchor.y);
+    circle.setAttribute("r", 3.2);
+    circle.setAttribute("class", `preview-anchor${connectedIndices.has(index) ? " connected" : ""}`);
+    fragment.appendChild(circle);
+  });
+  return fragment;
+}
+
 function getPlacementPreview(type, pointerX, pointerY, rotation = 0) {
-  const rawX = snapToIncrement(pointerX, HALF_PANEL);
-  const rawY = snapToIncrement(pointerY, HALF_PANEL);
+  const rawX = pointerX;
+  const rawY = pointerY;
   const preview = {
     id: "preview",
     type,
@@ -697,17 +717,16 @@ function getPlacementPreview(type, pointerX, pointerY, rotation = 0) {
       previewAnchors.forEach((anchor) => {
         const dx = targetAnchor.x - anchor.x;
         const dy = targetAnchor.y - anchor.y;
-        const distance = Math.hypot(dx, dy);
-        if (distance > SNAP_DISTANCE_UNITS) return;
-
         const candidateX = rawX + dx;
         const candidateY = rawY + dy;
+        const distanceFromPointer = Math.hypot(candidateX - pointerX, candidateY - pointerY);
+        if (distanceFromPointer > PLACEMENT_LOCK_DISTANCE) return;
         const key = `${Math.round(candidateX * 100) / 100}:${Math.round(candidateY * 100) / 100}`;
         if (!candidates.has(key)) {
           candidates.set(key, {
             x: candidateX,
             y: candidateY,
-            distanceFromPointer: Math.hypot(candidateX - pointerX, candidateY - pointerY),
+            distanceFromPointer,
           });
         }
       });
@@ -715,18 +734,27 @@ function getPlacementPreview(type, pointerX, pointerY, rotation = 0) {
   });
 
   let best = {
-    x: rawX,
-    y: rawY,
+    x: snapToIncrement(rawX, HALF_PANEL),
+    y: snapToIncrement(rawY, HALF_PANEL),
     snapped: false,
-    valid: !state.panels.some((panel) => Math.hypot(panel.x - rawX, panel.y - rawY) < SNAP_DISTANCE_UNITS),
+    valid: !state.panels.some(
+      (panel) =>
+        Math.abs(panel.x - snapToIncrement(rawX, HALF_PANEL)) < SNAP_DISTANCE_UNITS &&
+        Math.abs(panel.y - snapToIncrement(rawY, HALF_PANEL)) < SNAP_DISTANCE_UNITS
+    ),
+    connectorMatches: 0,
+    connectedIndices: new Set(),
   };
 
   candidates.forEach((candidate) => {
     const positioned = { ...preview, x: candidate.x, y: candidate.y };
     const previewConnections = getConnectionMapForPanels([...state.panels, positioned]);
     const connectorMatches = previewConnections.get("preview")?.anchorIndices.size || 0;
+    const connectedIndices = previewConnections.get("preview")?.anchorIndices || new Set();
     const overlaps = state.panels.some(
-      (panel) => Math.hypot(panel.x - candidate.x, panel.y - candidate.y) < SNAP_DISTANCE_UNITS
+      (panel) =>
+        Math.abs(panel.x - candidate.x) < SNAP_DISTANCE_UNITS &&
+        Math.abs(panel.y - candidate.y) < SNAP_DISTANCE_UNITS
     );
     const scored = {
       x: candidate.x,
@@ -735,6 +763,7 @@ function getPlacementPreview(type, pointerX, pointerY, rotation = 0) {
       valid: !overlaps,
       connectorMatches,
       distanceFromPointer: candidate.distanceFromPointer,
+      connectedIndices,
     };
 
     if (!best.snapped && scored.snapped) {
@@ -755,6 +784,7 @@ function getPlacementPreview(type, pointerX, pointerY, rotation = 0) {
     panel: { ...preview, x: best.x, y: best.y },
     snapped: best.snapped,
     valid: best.valid,
+    connectedIndices: best.connectedIndices || new Set(),
   };
 }
 
@@ -762,7 +792,7 @@ function renderCanvasPreview() {
   els.canvasPreview.innerHTML = "";
   if (!state.placement.active || !state.placement.preview) return;
 
-  const { panel, snapped, valid } = state.placement.preview;
+  const { panel, snapped, valid, connectedIndices } = state.placement.preview;
   const geometry = getGeometry(panel);
   const group = document.createElementNS(SVG_NS, "g");
   group.setAttribute(
@@ -771,6 +801,7 @@ function renderCanvasPreview() {
   );
   group.appendChild(createShapeElement(panel, geometry));
   group.appendChild(createTextElement(panel, geometry));
+  group.appendChild(createPreviewAnchors(panel, geometry, connectedIndices));
   els.canvasPreview.appendChild(group);
 }
 
@@ -944,8 +975,6 @@ function updateMetrics() {
     els.layoutWidth.textContent = "0.00 m";
     els.layoutHeight.textContent = "0.00 m";
     els.connectionStatus.textContent = "Ready";
-    renderInventory();
-    renderLibrary();
     return;
   }
 
@@ -955,9 +984,6 @@ function updateMetrics() {
   const disconnectedCount = state.panels.filter((panel) => !isPanelConnected(panel.id)).length;
   els.connectionStatus.textContent =
     disconnectedCount > 0 ? `${disconnectedCount} disconnected` : "All connected";
-
-  renderInventory();
-  renderLibrary();
 }
 
 function renderSelectedMeta() {
@@ -1085,8 +1111,7 @@ function onCanvasPointerUp() {
   state.drag.panelIds.forEach((panelId) => {
     const panel = getPanelById(panelId);
     if (!panel) return;
-    panel.x = snapToIncrement(panel.x, HALF_PANEL);
-    panel.y = snapToIncrement(panel.y, HALF_PANEL);
+    snapPanel(panel, PLACEMENT_LOCK_DISTANCE);
   });
   computeConnections();
 
@@ -1124,7 +1149,7 @@ function onCanvasClick(event) {
   }
 }
 
-function snapPanel(panel) {
+function snapPanel(panel, threshold = SNAP_DISTANCE_UNITS) {
   const geometry = getGeometry(panel);
   let bestMatch = null;
 
@@ -1140,7 +1165,7 @@ function snapPanel(panel) {
         const dy = targetAnchor.y - currentAnchor.y;
         const distance = Math.hypot(dx, dy);
 
-        if (distance <= SNAP_DISTANCE_UNITS && (!bestMatch || distance < bestMatch.distance)) {
+        if (distance <= threshold && (!bestMatch || distance < bestMatch.distance)) {
           bestMatch = { dx, dy, distance };
         }
       });
@@ -1777,6 +1802,7 @@ function restoreProject(project) {
     selectedPanel: false,
     panelLibrary: true,
     inventory: true,
+    help: true,
     ...(project.ui?.collapsedSections || {}),
   };
   state.panels = [];
@@ -1834,6 +1860,8 @@ async function saveToPdf() {
   const clone = els.canvas.cloneNode(true);
   const previewLayer = clone.querySelector("#canvasPreview");
   if (previewLayer) previewLayer.innerHTML = "";
+  const background = clone.querySelector("#canvasBackground");
+  if (background) background.setAttribute("style", "fill:#ffffff");
   clone.setAttribute("xmlns", SVG_NS);
 
   const viewBox = els.canvas.getAttribute("viewBox") || "0 0 2400 1600";
@@ -1860,7 +1888,7 @@ async function saveToPdf() {
     canvas.width = Math.max(1, Math.round(svgWidth * scale));
     canvas.height = Math.max(1, Math.round(svgHeight * scale));
     const context = canvas.getContext("2d");
-    context.fillStyle = "#fffaf2";
+    context.fillStyle = "#ffffff";
     context.fillRect(0, 0, canvas.width, canvas.height);
     context.drawImage(image, 0, 0, canvas.width, canvas.height);
 
@@ -1969,13 +1997,38 @@ function wireEvents() {
   });
 
   window.addEventListener("keydown", (event) => {
+    const typing = isTypingTarget(event.target);
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "z") {
       event.preventDefault();
       undoLastAction();
     }
-    if (event.key === "Escape") setPlacementMode(null);
-    if (event.key === "Delete") removeSelectedPanel();
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "s") {
+      event.preventDefault();
+      saveProject();
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "o") {
+      event.preventDefault();
+      els.projectFileInput.click();
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "p") {
+      event.preventDefault();
+      void saveToPdf();
+      return;
+    }
+    if (event.key === "Escape") {
+      setPlacementMode(null);
+      return;
+    }
+    if (typing) return;
+    if (event.key === "Delete" || event.key === "Backspace") removeSelectedPanel();
     if (event.key.toLowerCase() === "r") rotateSelectedPanel();
+    if (event.key.toLowerCase() === "d") duplicateSelectedPanel();
+    if (event.key.toLowerCase() === "g") generateTextLayout(true);
+    if (event.key === "1") setPlacementMode("MG9");
+    if (event.key === "2") setPlacementMode("MG12");
+    if (event.key === "3") setPlacementMode("MG13");
   });
 
   wireLiveTextEvents();
