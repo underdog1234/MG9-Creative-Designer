@@ -11,91 +11,130 @@
       <aside class="sidebar">
         <div class="panel">
           <p class="eyebrow">YES TECH Layout Tool</p>
-          <h1>MG9 Creative Designer</h1>
+          <div class="title-row">
+            <h1>MG9 Creative Designer</h1>
+            <span id="appVersionBadge" class="version-badge">v1.1.0</span>
+          </div>
           <p class="intro">
             Build stock-aware lettering and custom layouts with MG9 square panels, MG12 triangle
             panels, and MG13 quarter-circle panels.
           </p>
         </div>
 
-        <div class="panel">
-          <h2>Selected Panel</h2>
-          <div id="selectedMeta" class="selected-meta empty">Select a panel on the canvas.</div>
-          <div class="controls-stack">
-            <button id="rotateBtn" class="secondary-btn" type="button">Rotate 90 deg</button>
-            <button id="duplicateBtn" class="secondary-btn" type="button">Duplicate</button>
-            <button id="deleteBtn" class="danger-btn" type="button">Delete</button>
-          </div>
-          <p class="microcopy">
-            Shift-click or Ctrl-click to multi-select. Panels need two edge connector matches.
-            Unavailable stock is shown in grey.
-          </p>
-        </div>
-
-        <div class="panel">
-          <div class="section-heading">
-            <h2>Inventory</h2>
-            <button id="resetInventoryBtn" class="secondary-btn" type="button">Reset Used</button>
-          </div>
-          <div id="inventoryList" class="inventory-list"></div>
-        </div>
-
-        <div class="panel">
-          <div class="section-heading">
-            <h2>Panel Library</h2>
-            <button id="clearLayoutBtn" class="danger-btn" type="button">Clear Layout</button>
-          </div>
-          <p class="microcopy">
-            Click a panel to add it. New panels auto-attach to the selected layout when possible.
-          </p>
-          <div id="library" class="library-grid"></div>
-        </div>
-
-        <div class="panel">
-        <div class="section-heading">
-          <h2>Text Layout</h2>
-          <span class="pill">Live sizing</span>
-        </div>
-        <label class="field">
-          <span>Word, phrase, emoji, or sample sheet</span>
-          <textarea id="textInput" rows="5" maxlength="160">123456789
+        <section class="panel section-panel" data-section-key="textLayout">
+          <button class="section-toggle" type="button" data-section-toggle="textLayout" aria-expanded="true">
+            <span>Text Layout</span>
+            <span class="section-toggle-icon">−</span>
+          </button>
+          <div class="section-body" data-section-body="textLayout">
+            <div class="section-heading">
+              <h2>Text Layout</h2>
+              <span class="pill">Live sizing</span>
+            </div>
+            <label class="field">
+              <span>Project name</span>
+              <input id="projectNameInput" type="text" maxlength="120" value="untitled-layout" />
+            </label>
+            <label class="field">
+              <span>Word, phrase, emoji, or sample sheet</span>
+              <textarea id="textInput" rows="5" maxlength="160">123456789
 ABCDEFGHI
 JKLMNOPQR
 STUVWXYZ</textarea>
-        </label>
-          <div class="two-col">
-            <label class="field">
-              <span>Target height (m)</span>
-              <input id="heightMetersInput" type="number" min="0.5" max="100" step="0.5" value="2.5" />
             </label>
-            <label class="field">
-              <span>Actual width (m)</span>
-              <input id="actualWidthOutput" type="text" value="0.0" readonly />
-            </label>
+            <div class="two-col">
+              <label class="field">
+                <span>Target height (m)</span>
+                <input id="heightMetersInput" type="number" min="0.5" max="100" step="0.5" value="2.5" />
+              </label>
+              <label class="field">
+                <span>Actual width (m)</span>
+                <input id="actualWidthOutput" type="text" value="0.0" readonly />
+              </label>
+            </div>
+            <div class="two-col">
+              <label class="field">
+                <span>Spacing (m)</span>
+                <input id="spacingInput" type="number" min="0" max="10" step="0.5" value="0.5" />
+              </label>
+              <label class="field">
+                <span>Style</span>
+                <select id="letterStyleInput">
+                  <option value="mixed">Mixed creative</option>
+                  <option value="rect">MG9 only</option>
+                </select>
+              </label>
+            </div>
+            <div id="textSummary" class="summary-chip">Live layout ready.</div>
+            <div class="controls-stack">
+              <button id="generateTextBtn" class="primary-btn" type="button">Refresh Layout</button>
+              <button id="loadReferenceBtn" class="secondary-btn" type="button">Load Reference Sheet</button>
+            </div>
+            <div class="action-grid">
+              <button id="saveProjectBtn" class="secondary-btn" type="button">Save Project</button>
+              <button id="openProjectBtn" class="secondary-btn" type="button">Open Project</button>
+              <button id="savePdfBtn" class="secondary-btn" type="button">Save to PDF</button>
+              <button id="clearLayoutBtn" class="danger-btn" type="button">Clear Layout</button>
+            </div>
+            <p class="microcopy">
+              Height updates the layout live. Width is worked out from the chosen letters. Edit
+              `glyph-library.js` to fine-tune any character.
+            </p>
           </div>
-          <div class="two-col">
-            <label class="field">
-              <span>Spacing (m)</span>
-              <input id="spacingInput" type="number" min="0" max="10" step="0.5" value="0.5" />
-            </label>
-            <label class="field">
-              <span>Style</span>
-              <select id="letterStyleInput">
-                <option value="mixed">Mixed creative</option>
-                <option value="rect">MG9 only</option>
-              </select>
-            </label>
+        </section>
+
+        <section class="panel section-panel" data-section-key="selectedPanel">
+          <button class="section-toggle" type="button" data-section-toggle="selectedPanel" aria-expanded="true">
+            <span>Selected Panel</span>
+            <span class="section-toggle-icon">−</span>
+          </button>
+          <div class="section-body" data-section-body="selectedPanel">
+            <div id="selectedMeta" class="selected-meta empty">Select a panel on the canvas.</div>
+            <div class="controls-stack">
+              <button id="rotateBtn" class="secondary-btn" type="button">Rotate 90 deg</button>
+              <button id="duplicateBtn" class="secondary-btn" type="button">Duplicate</button>
+              <button id="deleteBtn" class="danger-btn" type="button">Delete</button>
+            </div>
+            <div class="replace-panel-type">
+              <div class="section-heading compact">
+                <h2>Replace Type</h2>
+              </div>
+              <div id="replaceTypeLibrary" class="library-grid replace-grid"></div>
+            </div>
+            <p class="microcopy">
+              Shift-click or Ctrl-click to multi-select. Replace type swaps the selected panel or group in place.
+            </p>
           </div>
-          <div id="textSummary" class="summary-chip">Live layout ready.</div>
-          <div class="controls-stack">
-            <button id="generateTextBtn" class="primary-btn" type="button">Refresh Layout</button>
-            <button id="loadReferenceBtn" class="secondary-btn" type="button">Load Reference Sheet</button>
+        </section>
+
+        <section class="panel section-panel is-collapsed" data-section-key="panelLibrary">
+          <button class="section-toggle" type="button" data-section-toggle="panelLibrary" aria-expanded="false">
+            <span>Panel Library</span>
+            <span class="section-toggle-icon">+</span>
+          </button>
+          <div class="section-body" data-section-body="panelLibrary" hidden>
+            <p class="microcopy">
+              Click a panel to arm placement mode, then click the canvas to place it. Press `Esc` to cancel placement.
+            </p>
+            <div id="library" class="library-grid"></div>
           </div>
-          <p class="microcopy">
-            Height updates the layout live. Width is worked out from the chosen letters. Edit
-            `glyph-library.js` to fine-tune any character.
-          </p>
-        </div>
+        </section>
+
+        <section class="panel section-panel is-collapsed" data-section-key="inventory">
+          <button class="section-toggle" type="button" data-section-toggle="inventory" aria-expanded="false">
+            <span>Inventory</span>
+            <span class="section-toggle-icon">+</span>
+          </button>
+          <div class="section-body" data-section-body="inventory" hidden>
+            <div class="section-heading">
+              <h2>Inventory</h2>
+              <button id="resetInventoryBtn" class="secondary-btn" type="button">Reset Used</button>
+            </div>
+            <div id="inventoryList" class="inventory-list"></div>
+          </div>
+        </section>
+
+        <input id="projectFileInput" type="file" accept="application/json,.json" hidden />
 
       </aside>
 
@@ -144,6 +183,7 @@ STUVWXYZ</textarea>
             <rect id="canvasSubgrid" class="canvas-subgrid" x="0" y="0" width="2400" height="1600"></rect>
             <rect id="canvasGrid" class="canvas-grid" x="0" y="0" width="2400" height="1600"></rect>
             <g id="canvasGuides"></g>
+            <g id="canvasPreview"></g>
             <g id="canvasPanels"></g>
           </svg>
         </div>
@@ -176,6 +216,7 @@ STUVWXYZ</textarea>
     </template>
 
     <script src="./glyph-library.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
     <script src="./app.js"></script>
   </body>
 </html>

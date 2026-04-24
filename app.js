@@ -1,4 +1,5 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
+const APP_VERSION = "1.1.0";
 const MM_TO_UNITS = 0.25;
 const PANEL_SIZE_MM = 500;
 const PANEL_SIZE_UNITS = PANEL_SIZE_MM * MM_TO_UNITS;
@@ -105,6 +106,7 @@ const state = {
   panels: [],
   selectedId: null,
   selectedIds: [],
+  projectName: "untitled-layout",
   zoom: 1,
   drag: null,
   nextId: 1,
@@ -113,14 +115,29 @@ const state = {
   history: [],
   currentViewBox: "0 0 2400 1600",
   manualViewLocked: false,
+  collapsedSections: {
+    textLayout: false,
+    selectedPanel: false,
+    panelLibrary: true,
+    inventory: true,
+  },
+  placement: {
+    active: false,
+    type: null,
+    pointer: null,
+    preview: null,
+  },
 };
 
 const els = {
+  appVersionBadge: document.querySelector("#appVersionBadge"),
   inventoryList: document.querySelector("#inventoryList"),
   library: document.querySelector("#library"),
+  replaceTypeLibrary: document.querySelector("#replaceTypeLibrary"),
   canvas: document.querySelector("#layoutCanvas"),
   canvasPanels: document.querySelector("#canvasPanels"),
   canvasGuides: document.querySelector("#canvasGuides"),
+  canvasPreview: document.querySelector("#canvasPreview"),
   canvasBackground: document.querySelector("#canvasBackground"),
   canvasGrid: document.querySelector("#canvasGrid"),
   canvasSubgrid: document.querySelector("#canvasSubgrid"),
@@ -130,6 +147,7 @@ const els = {
   panelCount: document.querySelector("#panelCount"),
   connectionStatus: document.querySelector("#connectionStatus"),
   zoomLabel: document.querySelector("#zoomLabel"),
+  projectNameInput: document.querySelector("#projectNameInput"),
   textInput: document.querySelector("#textInput"),
   heightMetersInput: document.querySelector("#heightMetersInput"),
   actualWidthOutput: document.querySelector("#actualWidthOutput"),
@@ -138,6 +156,9 @@ const els = {
   textSummary: document.querySelector("#textSummary"),
   generateTextBtn: document.querySelector("#generateTextBtn"),
   loadReferenceBtn: document.querySelector("#loadReferenceBtn"),
+  saveProjectBtn: document.querySelector("#saveProjectBtn"),
+  openProjectBtn: document.querySelector("#openProjectBtn"),
+  savePdfBtn: document.querySelector("#savePdfBtn"),
   rotateBtn: document.querySelector("#rotateBtn"),
   duplicateBtn: document.querySelector("#duplicateBtn"),
   deleteBtn: document.querySelector("#deleteBtn"),
@@ -146,8 +167,10 @@ const els = {
   resetInventoryBtn: document.querySelector("#resetInventoryBtn"),
   zoomInBtn: document.querySelector("#zoomInBtn"),
   zoomOutBtn: document.querySelector("#zoomOutBtn"),
+  projectFileInput: document.querySelector("#projectFileInput"),
   inventoryRowTemplate: document.querySelector("#inventoryRowTemplate"),
   libraryCardTemplate: document.querySelector("#libraryCardTemplate"),
+  sectionToggles: document.querySelectorAll("[data-section-toggle]"),
 };
 
 const EDGE_CONNECTORS_5 = [-0.8, -0.4, 0, 0.4, 0.8].map((value) => value * HALF_PANEL);
@@ -164,6 +187,14 @@ function unitsToMm(units) {
 
 function mmToMetersText(mm) {
   return `${(mm / 1000).toFixed(2)} m`;
+}
+
+function sanitizeProjectName(name) {
+  const cleaned = String(name || "")
+    .trim()
+    .replace(/[<>:"/\\|?*\x00-\x1F]/g, "-")
+    .replace(/\s+/g, " ");
+  return cleaned || "untitled-layout";
 }
 
 function snapToIncrement(value, increment) {
@@ -306,6 +337,11 @@ function snapshotState() {
     panels: state.panels.map((panel) => ({ ...panel })),
     selectedId: state.selectedId,
     selectedIds: [...state.selectedIds],
+    projectName: state.projectName,
+    placement: {
+      active: state.placement.active,
+      type: state.placement.type,
+    },
   };
 }
 
@@ -321,6 +357,12 @@ function undoLastAction() {
   state.panels = snapshot.panels.map((panel) => ({ ...panel }));
   state.selectedId = snapshot.selectedId;
   state.selectedIds = [...snapshot.selectedIds];
+  state.projectName = snapshot.projectName || "untitled-layout";
+  state.placement.active = snapshot.placement?.active ?? false;
+  state.placement.type = snapshot.placement?.type ?? null;
+  state.placement.preview = null;
+  state.placement.pointer = null;
+  els.projectNameInput.value = state.projectName;
   applyAvailability();
   computeConnections();
   render();
@@ -477,6 +519,35 @@ function clearSelection() {
   renderCanvas();
 }
 
+function setSectionCollapsed(sectionKey, collapsed) {
+  state.collapsedSections[sectionKey] = collapsed;
+  renderSections();
+}
+
+function renderSections() {
+  els.sectionToggles.forEach((toggle) => {
+    const sectionKey = toggle.dataset.sectionToggle;
+    const collapsed = Boolean(state.collapsedSections[sectionKey]);
+    const panel = toggle.closest(".section-panel");
+    const body = panel?.querySelector(`[data-section-body="${sectionKey}"]`);
+    toggle.setAttribute("aria-expanded", String(!collapsed));
+    const icon = toggle.querySelector(".section-toggle-icon");
+    if (icon) icon.textContent = collapsed ? "+" : "−";
+    panel?.classList.toggle("is-collapsed", collapsed);
+    if (body) body.hidden = collapsed;
+  });
+}
+
+function setPlacementMode(type = null) {
+  state.placement.active = Boolean(type);
+  state.placement.type = type;
+  state.placement.pointer = null;
+  state.placement.preview = null;
+  renderLibrary();
+  renderCanvasPreview();
+  renderSelectedMeta();
+}
+
 function renderInventory() {
   const usedCounts = getUsedCounts();
   els.inventoryList.innerHTML = "";
@@ -519,8 +590,44 @@ function renderLibrary() {
 
     card.querySelector(".library-name").textContent = type.name;
     card.querySelector(".library-dimensions").textContent = `${type.widthMm} x ${type.heightMm} mm - ${remaining} left`;
-    card.addEventListener("click", () => addPanel(type.id));
+    card.classList.toggle("active", state.placement.active && state.placement.type === type.id);
+    card.addEventListener("click", () => {
+      if (state.placement.active && state.placement.type === type.id) setPlacementMode(null);
+      else setPlacementMode(type.id);
+    });
     els.library.appendChild(card);
+  });
+}
+
+function replaceSelectedPanelType(type) {
+  const selectedPanels = getSelectedPanels();
+  if (!selectedPanels.length) return;
+  pushHistory();
+  selectedPanels.forEach((panel) => {
+    panel.type = type;
+  });
+  applyAvailability();
+  computeConnections();
+  render();
+}
+
+function renderReplaceTypeLibrary() {
+  els.replaceTypeLibrary.innerHTML = "";
+  const selectedPanels = getSelectedPanels();
+  const singleType = selectedPanels.length === 1 ? selectedPanels[0].type : null;
+
+  Object.values(PANEL_TYPES).forEach((type) => {
+    const card = els.libraryCardTemplate.content.firstElementChild.cloneNode(true);
+    const shape = card.querySelector(".library-shape");
+    shape.dataset.shape = type.shapeKind === "rect" ? "rect" : type.shapeKind;
+    shape.style.background = `linear-gradient(135deg, ${type.color}88, ${type.color}33)`;
+    card.classList.add("small-card");
+    card.classList.toggle("active", singleType === type.id);
+    card.querySelector(".library-name").textContent = type.id;
+    card.querySelector(".library-dimensions").textContent = "Replace selected";
+    card.disabled = selectedPanels.length === 0;
+    card.addEventListener("click", () => replaceSelectedPanelType(type.id));
+    els.replaceTypeLibrary.appendChild(card);
   });
 }
 
@@ -571,6 +678,102 @@ function createAnchors(panel, geometry) {
   return fragment;
 }
 
+function getPlacementPreview(type, pointerX, pointerY, rotation = 0) {
+  const rawX = snapToIncrement(pointerX, HALF_PANEL);
+  const rawY = snapToIncrement(pointerY, HALF_PANEL);
+  const preview = {
+    id: "preview",
+    type,
+    x: rawX,
+    y: rawY,
+    rotation,
+  };
+
+  const previewAnchors = getGlobalAnchors(preview);
+  const candidates = new Map();
+
+  state.panels.forEach((panel) => {
+    getGlobalAnchors(panel).forEach((targetAnchor) => {
+      previewAnchors.forEach((anchor) => {
+        const dx = targetAnchor.x - anchor.x;
+        const dy = targetAnchor.y - anchor.y;
+        const distance = Math.hypot(dx, dy);
+        if (distance > SNAP_DISTANCE_UNITS) return;
+
+        const candidateX = rawX + dx;
+        const candidateY = rawY + dy;
+        const key = `${Math.round(candidateX * 100) / 100}:${Math.round(candidateY * 100) / 100}`;
+        if (!candidates.has(key)) {
+          candidates.set(key, {
+            x: candidateX,
+            y: candidateY,
+            distanceFromPointer: Math.hypot(candidateX - pointerX, candidateY - pointerY),
+          });
+        }
+      });
+    });
+  });
+
+  let best = {
+    x: rawX,
+    y: rawY,
+    snapped: false,
+    valid: !state.panels.some((panel) => Math.hypot(panel.x - rawX, panel.y - rawY) < SNAP_DISTANCE_UNITS),
+  };
+
+  candidates.forEach((candidate) => {
+    const positioned = { ...preview, x: candidate.x, y: candidate.y };
+    const previewConnections = getConnectionMapForPanels([...state.panels, positioned]);
+    const connectorMatches = previewConnections.get("preview")?.anchorIndices.size || 0;
+    const overlaps = state.panels.some(
+      (panel) => Math.hypot(panel.x - candidate.x, panel.y - candidate.y) < SNAP_DISTANCE_UNITS
+    );
+    const scored = {
+      x: candidate.x,
+      y: candidate.y,
+      snapped: connectorMatches > 0,
+      valid: !overlaps,
+      connectorMatches,
+      distanceFromPointer: candidate.distanceFromPointer,
+    };
+
+    if (!best.snapped && scored.snapped) {
+      best = scored;
+      return;
+    }
+
+    if (best.snapped === scored.snapped) {
+      const betterDistance = scored.distanceFromPointer < (best.distanceFromPointer ?? Infinity) - 0.1;
+      const betterMatches = scored.connectorMatches > (best.connectorMatches || 0);
+      if (betterDistance || (!betterDistance && betterMatches)) {
+        best = scored;
+      }
+    }
+  });
+
+  return {
+    panel: { ...preview, x: best.x, y: best.y },
+    snapped: best.snapped,
+    valid: best.valid,
+  };
+}
+
+function renderCanvasPreview() {
+  els.canvasPreview.innerHTML = "";
+  if (!state.placement.active || !state.placement.preview) return;
+
+  const { panel, snapped, valid } = state.placement.preview;
+  const geometry = getGeometry(panel);
+  const group = document.createElementNS(SVG_NS, "g");
+  group.setAttribute(
+    "class",
+    `preview-group${snapped && valid ? " snap-ready" : ""}${valid ? "" : " invalid-preview"}`
+  );
+  group.appendChild(createShapeElement(panel, geometry));
+  group.appendChild(createTextElement(panel, geometry));
+  els.canvasPreview.appendChild(group);
+}
+
 function renderCanvas() {
   computeConnections();
   els.canvasPanels.innerHTML = "";
@@ -608,6 +811,7 @@ function renderCanvas() {
     els.canvasPanels.appendChild(group);
   });
 
+  renderCanvasPreview();
   updateMetrics();
   renderGuides();
 }
@@ -761,7 +965,9 @@ function renderSelectedMeta() {
   const panel = getPanelById(state.selectedId);
   if (!panel || !selectedPanels.length) {
     els.selectedMeta.classList.add("empty");
-    els.selectedMeta.textContent = "Select a panel on the canvas.";
+    els.selectedMeta.textContent = state.placement.active
+      ? `Placement mode: ${state.placement.type}. Click the canvas to place panels or press Esc to cancel.`
+      : "Select a panel on the canvas.";
     return;
   }
 
@@ -789,8 +995,12 @@ function renderSelectedMeta() {
 }
 
 function render() {
+  els.appVersionBadge.textContent = `v${APP_VERSION}`;
+  els.projectNameInput.value = state.projectName;
+  renderSections();
   renderInventory();
   renderLibrary();
+  renderReplaceTypeLibrary();
   renderSelectedMeta();
   renderCanvas();
   updateZoom();
@@ -855,6 +1065,21 @@ function onCanvasPointerMove(event) {
   renderSelectedMeta();
 }
 
+function onCanvasHover(event) {
+  if (!state.placement.active || state.drag) return;
+  const pointer = screenToSvg(event);
+  state.placement.pointer = pointer;
+  state.placement.preview = getPlacementPreview(state.placement.type, pointer.x, pointer.y);
+  renderCanvasPreview();
+}
+
+function onCanvasLeave() {
+  if (!state.placement.active || state.drag) return;
+  state.placement.pointer = null;
+  state.placement.preview = null;
+  renderCanvasPreview();
+}
+
 function onCanvasPointerUp() {
   if (!state.drag) return;
   state.drag.panelIds.forEach((panelId) => {
@@ -875,6 +1100,24 @@ function onCanvasClick(event) {
     event.target.classList.contains("canvas-bg") ||
     event.target.classList.contains("canvas-grid") ||
     event.target.classList.contains("canvas-subgrid");
+
+  if (isBackground && state.placement.active) {
+    const pointer = screenToSvg(event);
+    const preview = getPlacementPreview(state.placement.type, pointer.x, pointer.y);
+    if (!preview.valid) return;
+    pushHistory();
+    state.manualViewLocked = true;
+    const panel = createPanel(preview.panel.type, preview.panel.x, preview.panel.y, preview.panel.rotation);
+    state.panels.push(panel);
+    state.selectedId = panel.id;
+    state.selectedIds = [panel.id];
+    applyAvailability();
+    computeConnections();
+    state.placement.pointer = pointer;
+    state.placement.preview = getPlacementPreview(state.placement.type, pointer.x, pointer.y);
+    render();
+    return;
+  }
 
   if (isBackground) {
     clearSelection();
@@ -948,6 +1191,10 @@ function findPlacementForNewPanel(type, rotation = 0) {
 function clearLayout() {
   pushHistory();
   state.manualViewLocked = false;
+  state.placement.active = false;
+  state.placement.type = null;
+  state.placement.pointer = null;
+  state.placement.preview = null;
   state.panels = [];
   state.selectedId = null;
   state.selectedIds = [];
@@ -959,6 +1206,10 @@ function clearLayout() {
 function resetInventoryUsed() {
   pushHistory();
   state.manualViewLocked = false;
+  state.placement.active = false;
+  state.placement.type = null;
+  state.placement.pointer = null;
+  state.placement.preview = null;
   state.panels = [];
   state.selectedId = null;
   state.selectedIds = [];
@@ -1441,6 +1692,10 @@ function updateTextSummary(generatedPanels, targetWidthPanels, targetHeightPanel
 function generateTextLayout(showAlerts = false, recordHistory = true) {
   if (recordHistory) pushHistory();
   state.manualViewLocked = false;
+  state.placement.active = false;
+  state.placement.type = null;
+  state.placement.pointer = null;
+  state.placement.preview = null;
   const { generatedPanels, targetWidthPanels, targetHeightPanels, fromLibrary } = buildTextPanels();
   const optimizedPanels = fromLibrary ? generatedPanels : optimizeGeneratedPanels(generatedPanels);
   const stockCheck = checkStockForGeneratedPanels(optimizedPanels);
@@ -1471,7 +1726,199 @@ function clearAndResetInventory() {
   clearLayout();
 }
 
+function serializeProject() {
+  return {
+    version: APP_VERSION,
+    projectName: sanitizeProjectName(state.projectName),
+    inventory: { ...state.inventory },
+    panels: state.panels.map((panel) => ({
+      type: panel.type,
+      x: panel.x,
+      y: panel.y,
+      rotation: panel.rotation,
+    })),
+    textLayout: {
+      text: els.textInput.value,
+      heightMeters: Number(els.heightMetersInput.value) || 2.5,
+      spacing: Number(els.spacingInput.value) || 0.5,
+      style: els.letterStyleInput.value,
+    },
+    ui: {
+      collapsedSections: { ...state.collapsedSections },
+    },
+  };
+}
+
+function downloadFile(filename, content, mimeType) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
+function saveProject() {
+  state.projectName = sanitizeProjectName(els.projectNameInput.value);
+  els.projectNameInput.value = state.projectName;
+  const project = serializeProject();
+  downloadFile(`${project.projectName}.json`, JSON.stringify(project, null, 2), "application/json");
+}
+
+function restoreProject(project) {
+  if (!project || typeof project !== "object") throw new Error("Invalid project file.");
+  if (!Array.isArray(project.panels)) throw new Error("Project file is missing panels.");
+
+  state.projectName = sanitizeProjectName(project.projectName);
+  state.inventory = { ...defaultInventory, ...(project.inventory || {}) };
+  state.collapsedSections = {
+    textLayout: false,
+    selectedPanel: false,
+    panelLibrary: true,
+    inventory: true,
+    ...(project.ui?.collapsedSections || {}),
+  };
+  state.panels = [];
+  state.nextId = 1;
+
+  (project.panels || []).forEach((panel) => {
+    state.panels.push(
+      createPanel(panel.type, Number(panel.x) || 500, Number(panel.y) || 500, Number(panel.rotation) || 0)
+    );
+  });
+
+  els.projectNameInput.value = state.projectName;
+  els.textInput.value = project.textLayout?.text ?? els.textInput.value;
+  els.heightMetersInput.value = String(project.textLayout?.heightMeters ?? 2.5);
+  els.spacingInput.value = String(project.textLayout?.spacing ?? 0.5);
+  els.letterStyleInput.value = project.textLayout?.style ?? "mixed";
+
+  state.selectedId = null;
+  state.selectedIds = [];
+  state.manualViewLocked = false;
+  state.placement.active = false;
+  state.placement.type = null;
+  state.placement.pointer = null;
+  state.placement.preview = null;
+  applyAvailability();
+  computeConnections();
+  render();
+}
+
+function openProjectFile(event) {
+  const [file] = event.target.files || [];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const parsed = JSON.parse(String(reader.result || "{}"));
+      restoreProject(parsed);
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : "Could not open project file.");
+    }
+    event.target.value = "";
+  };
+  reader.readAsText(file);
+}
+
+async function saveToPdf() {
+  const jspdfApi = window.jspdf?.jsPDF;
+  if (!jspdfApi) {
+    window.alert("PDF export library did not load.");
+    return;
+  }
+
+  const bounds = getLayoutBounds();
+  const serializer = new XMLSerializer();
+  const clone = els.canvas.cloneNode(true);
+  const previewLayer = clone.querySelector("#canvasPreview");
+  if (previewLayer) previewLayer.innerHTML = "";
+  clone.setAttribute("xmlns", SVG_NS);
+
+  const viewBox = els.canvas.getAttribute("viewBox") || "0 0 2400 1600";
+  const [, , widthStr, heightStr] = viewBox.split(" ");
+  const svgWidth = Number(widthStr) || 2400;
+  const svgHeight = Number(heightStr) || 1600;
+  clone.setAttribute("width", String(svgWidth));
+  clone.setAttribute("height", String(svgHeight));
+
+  const svgMarkup = serializer.serializeToString(clone);
+  const svgBlob = new Blob([svgMarkup], { type: "image/svg+xml;charset=utf-8" });
+  const url = URL.createObjectURL(svgBlob);
+
+  try {
+    const image = await new Promise((resolve, reject) => {
+      const img = new Image();
+      img.onload = () => resolve(img);
+      img.onerror = reject;
+      img.src = url;
+    });
+
+    const canvas = document.createElement("canvas");
+    const scale = Math.min(1.6, 2200 / Math.max(svgWidth, svgHeight));
+    canvas.width = Math.max(1, Math.round(svgWidth * scale));
+    canvas.height = Math.max(1, Math.round(svgHeight * scale));
+    const context = canvas.getContext("2d");
+    context.fillStyle = "#fffaf2";
+    context.fillRect(0, 0, canvas.width, canvas.height);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+    const pdf = new jspdfApi({
+      orientation: canvas.width >= canvas.height ? "landscape" : "portrait",
+      unit: "pt",
+      format: "a4",
+    });
+
+    const pageWidth = pdf.internal.pageSize.getWidth();
+    const pageHeight = pdf.internal.pageSize.getHeight();
+    const margin = 36;
+    const headerY = 36;
+    const projectName = sanitizeProjectName(state.projectName);
+    const widthText = bounds.hasPanels ? mmToMetersText(unitsToMm(bounds.width)) : "0.00 m";
+    const heightText = bounds.hasPanels ? mmToMetersText(unitsToMm(bounds.height)) : "0.00 m";
+
+    pdf.setFont("helvetica", "bold");
+    pdf.setFontSize(18);
+    pdf.text(projectName, margin, headerY);
+    pdf.setFont("helvetica", "normal");
+    pdf.setFontSize(10);
+    pdf.text(`Version v${APP_VERSION}`, margin, headerY + 16);
+    pdf.text(`Layout width: ${widthText}`, margin, headerY + 34);
+    pdf.text(`Layout height: ${heightText}`, margin, headerY + 48);
+    pdf.text(`Panels used: ${state.panels.length}`, margin, headerY + 62);
+
+    const imageTop = headerY + 80;
+    const availableWidth = pageWidth - margin * 2;
+    const availableHeight = pageHeight - imageTop - margin;
+    const imageRatio = canvas.width / canvas.height;
+    let imageWidth = availableWidth;
+    let imageHeight = imageWidth / imageRatio;
+    if (imageHeight > availableHeight) {
+      imageHeight = availableHeight;
+      imageWidth = imageHeight * imageRatio;
+    }
+
+    pdf.addImage(
+      canvas.toDataURL("image/png"),
+      "PNG",
+      margin,
+      imageTop,
+      imageWidth,
+      imageHeight,
+      undefined,
+      "FAST"
+    );
+    pdf.save(`${projectName}-v${APP_VERSION}.pdf`);
+  } finally {
+    URL.revokeObjectURL(url);
+  }
+}
+
 function wireLiveTextEvents() {
+  els.projectNameInput.addEventListener("input", (event) => {
+    state.projectName = sanitizeProjectName(event.target.value);
+  });
   els.textInput.addEventListener("input", scheduleAutoGenerate);
 
   els.heightMetersInput.addEventListener("input", () => {
@@ -1484,6 +1931,8 @@ function wireLiveTextEvents() {
 
 function wireEvents() {
   els.canvas.addEventListener("click", onCanvasClick);
+  els.canvas.addEventListener("pointermove", onCanvasHover);
+  els.canvas.addEventListener("pointerleave", onCanvasLeave);
   window.addEventListener("pointermove", onCanvasPointerMove);
   window.addEventListener("pointerup", onCanvasPointerUp);
 
@@ -1492,12 +1941,24 @@ function wireEvents() {
     els.textInput.value = REFERENCE_SAMPLE_TEXT;
     generateTextLayout(false);
   });
+  els.saveProjectBtn.addEventListener("click", saveProject);
+  els.openProjectBtn.addEventListener("click", () => els.projectFileInput.click());
+  els.savePdfBtn.addEventListener("click", () => {
+    void saveToPdf();
+  });
   els.undoBtn.addEventListener("click", undoLastAction);
   els.rotateBtn.addEventListener("click", rotateSelectedPanel);
   els.duplicateBtn.addEventListener("click", duplicateSelectedPanel);
   els.deleteBtn.addEventListener("click", removeSelectedPanel);
   els.clearLayoutBtn.addEventListener("click", clearLayout);
   els.resetInventoryBtn.addEventListener("click", clearAndResetInventory);
+  els.projectFileInput.addEventListener("change", openProjectFile);
+  els.sectionToggles.forEach((toggle) => {
+    toggle.addEventListener("click", () => {
+      const sectionKey = toggle.dataset.sectionToggle;
+      setSectionCollapsed(sectionKey, !state.collapsedSections[sectionKey]);
+    });
+  });
   els.zoomInBtn.addEventListener("click", () => {
     state.zoom = Math.min(2, state.zoom + 0.1);
     updateZoom();
@@ -1512,6 +1973,7 @@ function wireEvents() {
       event.preventDefault();
       undoLastAction();
     }
+    if (event.key === "Escape") setPlacementMode(null);
     if (event.key === "Delete") removeSelectedPanel();
     if (event.key.toLowerCase() === "r") rotateSelectedPanel();
   });

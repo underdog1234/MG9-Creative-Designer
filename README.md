@@ -2,6 +2,14 @@
 
 Small browser-based planning tool for YES TECH `MG9`, `MG12`, and `MG13` LED panels.
 
+## What's New in v1.1.0
+
+- Added a versioned project workflow with project name, JSON save/open, and direct PDF export
+- Reworked manual panel placement into a sticky placement mode with highlighted library selection
+- Added clearer panel selection, in-place panel type replacement, and stronger selected-panel controls
+- Reordered the sidebar into collapsible sections for faster layout editing
+- Improved connector-targeted manual placement so panels stay on the join you are aiming for
+
 ## What it does
 
 - Tracks total stock and used stock for each panel type
