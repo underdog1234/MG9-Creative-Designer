@@ -2,22 +2,26 @@
 
 Small browser-based planning tool for YES TECH `MG9`, `MG12`, and `MG13` LED panels.
 
-## What's New in v1.1.0
+## What's New in v1.2.0
 
-- Added a versioned project workflow with project name, JSON save/open, and direct PDF export
-- Reworked manual panel placement into a sticky placement mode with highlighted library selection
-- Added clearer panel selection, in-place panel type replacement, and stronger selected-panel controls
-- Reordered the sidebar into collapsible sections for faster layout editing
-- Improved connector-targeted manual placement so panels stay on the join you are aiming for
+- Triangle panels no longer join on their long (hypotenuse) side — only on their two legs
+- Shaped panels (`MG12`, `MG13`) now track stock per orientation (↖ Left-Up, ↙ Left-Down, ↗ Right-Up, ↘ Right-Down), and availability is checked against the matching orientation bucket
+- PDF export renders on a white background (no more black page) and lists total panels used plus a per-type / per-orientation breakdown
+- New PNG preview export: pick one solid colour and download a transparent-background preview of the whole layout
+- Copy (`Ctrl/Cmd+C`) and Paste-at-cursor (`Ctrl/Cmd+V`) keep multi-panel selections grouped with their exact spacing; Duplicate is also fixed to preserve grouping
+- Drag a marquee on the empty canvas to select multiple panels at once
+- Corrected reference glyphs for `2`, `3`, `B`, `K`, `N`, `Y`
+- Rebuilt rendering and connection detection (spatial hashing, geometry caching, transform-based drag) so large layouts stay smooth
 
 ## What it does
 
-- Tracks total stock and used stock for each panel type
+- Tracks stock and used counts for each panel type, and per orientation for shaped panels
 - Lets you add panels manually and drag them around a snap-aware layout canvas
 - Snaps panels by connector anchor points instead of only by loose bounding boxes
 - Generates authored 5-panel-high text layouts from a glyph library
 - Supports multiline sample-sheet layouts for visual glyph tuning
 - Shows overall layout width, height, and total panel count
+- Exports to PDF (documentation) and PNG (single-colour preview)
 
 ## Real-world assumptions used
 
@@ -28,8 +32,11 @@ Small browser-based planning tool for YES TECH `MG9`, `MG12`, and `MG13` LED pan
 ## Default stock loaded into the tool
 
 - `MG9`: `320`
-- `MG12`: `20`
-- `MG13`: `20`
+- `MG12`: `20` (split evenly across the four orientations — `5` each)
+- `MG13`: `20` (split evenly across the four orientations — `5` each)
+
+Older project files that stored a single number for `MG12`/`MG13` are migrated automatically by
+splitting that number evenly across the four orientation buckets.
 
 ## Glyph tuning
 

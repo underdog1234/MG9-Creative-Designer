@@ -1,5 +1,5 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
-const APP_VERSION = "1.1.0";
+const APP_VERSION = "1.2.0";
 const MM_TO_UNITS = 0.25;
 const PANEL_SIZE_MM = 500;
 const PANEL_SIZE_UNITS = PANEL_SIZE_MM * MM_TO_UNITS;
@@ -96,20 +96,102 @@ const GLYPH_LIBRARY = window.GLYPH_LIBRARY || {
   " ": ["..", "..", "..", "..", ".."],
 };
 
-const defaultInventory = {
+// Shaped panels (triangle + quarter-circle) are stocked per orientation. Each
+// physical piece points one of four ways, keyed by the location of its
+// right-angle corner after rotation.
+const SHAPED_TYPES = ["MG12", "MG13"];
+const ORIENTATIONS = [
+  { key: "LU", icon: "↖", label: "Left Up" },
+  { key: "LD", icon: "↙", label: "Left Down" },
+  { key: "RU", icon: "↗", label: "Right Up" },
+  { key: "RD", icon: "↘", label: "Right Down" },
+];
+// Right-angle corner after rotation -> orientation bucket (SVG clockwise).
+const TRIANGLE_ORIENTATION = { 0: "LD", 90: "LU", 180: "RU", 270: "RD" };
+const SECTOR_ORIENTATION = { 0: "RD", 90: "LD", 180: "LU", 270: "RU" };
+
+function normalizeRotation(rotation) {
+  return (((Math.round((Number(rotation) || 0) / 90) * 90) % 360) + 360) % 360;
+}
+
+function isShapedType(type) {
+  return SHAPED_TYPES.includes(type);
+}
+
+function getPanelOrientation(panel) {
+  const type = PANEL_TYPES[panel.type];
+  if (!type) return null;
+  const rot = normalizeRotation(panel.rotation);
+  if (type.shapeKind === "triangle") return TRIANGLE_ORIENTATION[rot];
+  if (type.shapeKind === "sector") return SECTOR_ORIENTATION[rot];
+  return null;
+}
+
+function splitEvenly(total) {
+  const count = Math.max(0, Math.floor(Number(total) || 0));
+  const base = Math.floor(count / 4);
+  const remainder = count % 4;
+  const buckets = {};
+  ORIENTATIONS.forEach((orientation, index) => {
+    buckets[orientation.key] = base + (index < remainder ? 1 : 0);
+  });
+  return buckets;
+}
+
+function normalizeInventory(raw) {
+  const inventory = { MG9: Math.max(0, Number(raw?.MG9) || 0) };
+  SHAPED_TYPES.forEach((type) => {
+    const value = raw?.[type];
+    if (value && typeof value === "object") {
+      inventory[type] = {};
+      ORIENTATIONS.forEach((orientation) => {
+        inventory[type][orientation.key] = Math.max(0, Number(value[orientation.key]) || 0);
+      });
+    } else {
+      inventory[type] = splitEvenly(value);
+    }
+  });
+  return inventory;
+}
+
+function cloneInventory(inventory) {
+  return normalizeInventory(inventory);
+}
+
+function getStock(type, orientation) {
+  if (isShapedType(type)) return Number(state.inventory[type]?.[orientation]) || 0;
+  return Number(state.inventory[type]) || 0;
+}
+
+function getStockTotal(type) {
+  if (isShapedType(type)) {
+    return ORIENTATIONS.reduce(
+      (total, orientation) => total + (Number(state.inventory[type]?.[orientation.key]) || 0),
+      0
+    );
+  }
+  return Number(state.inventory[type]) || 0;
+}
+
+const DEFAULT_INVENTORY_RAW = {
   MG9: 320,
   MG12: 20,
   MG13: 20,
 };
 
+const defaultInventory = normalizeInventory(DEFAULT_INVENTORY_RAW);
+
 const state = {
-  inventory: { ...defaultInventory },
+  inventory: cloneInventory(defaultInventory),
   panels: [],
   selectedId: null,
   selectedIds: [],
   projectName: "untitled-layout",
   zoom: 1,
   drag: null,
+  marquee: null,
+  clipboard: null,
+  lastPointer: null,
   nextId: 1,
   connectionMap: new Map(),
   autoTextTimer: null,
@@ -140,6 +222,7 @@ const els = {
   canvasPanels: document.querySelector("#canvasPanels"),
   canvasGuides: document.querySelector("#canvasGuides"),
   canvasPreview: document.querySelector("#canvasPreview"),
+  canvasMarquee: document.querySelector("#canvasMarquee"),
   canvasBackground: document.querySelector("#canvasBackground"),
   canvasGrid: document.querySelector("#canvasGrid"),
   canvasSubgrid: document.querySelector("#canvasSubgrid"),
@@ -161,8 +244,12 @@ const els = {
   saveProjectBtn: document.querySelector("#saveProjectBtn"),
   openProjectBtn: document.querySelector("#openProjectBtn"),
   savePdfBtn: document.querySelector("#savePdfBtn"),
+  exportPngBtn: document.querySelector("#exportPngBtn"),
+  pngColorInput: document.querySelector("#pngColorInput"),
   rotateBtn: document.querySelector("#rotateBtn"),
   duplicateBtn: document.querySelector("#duplicateBtn"),
+  copyBtn: document.querySelector("#copyBtn"),
+  pasteBtn: document.querySelector("#pasteBtn"),
   deleteBtn: document.querySelector("#deleteBtn"),
   undoBtn: document.querySelector("#undoBtn"),
   clearLayoutBtn: document.querySelector("#clearLayoutBtn"),
@@ -249,14 +336,12 @@ function buildConnectorGrid() {
 const SHARED_CONNECTORS = buildConnectorGrid();
 
 function triangleEdgeConnectors() {
-  const diagonal = EDGE_CONNECTORS_5.map((value) => ({
-    x: value,
-    y: value,
-  }));
+  // Triangles may only join on their two legs (left + bottom edges). The
+  // hypotenuse (long side) intentionally exposes no connectors, so two
+  // triangles can never snap/connect along their long side.
   return [
     ...EDGE_CONNECTORS_5.map((y) => ({ x: -HALF_PANEL, y })),
     ...EDGE_CONNECTORS_5.map((x) => ({ x, y: HALF_PANEL })),
-    ...diagonal,
   ];
 }
 
@@ -306,17 +391,28 @@ function getPanelBaseGeometry(panelType) {
   };
 }
 
+// Rotated geometry only depends on (type, rotation) and rotation is always a
+// multiple of 90, so cache the handful of variants instead of recomputing the
+// trigonometry on every access.
+const geometryCache = new Map();
+
 function getGeometry(panel) {
-  const base = getPanelBaseGeometry(PANEL_TYPES[panel.type]);
-  return {
-    ...base,
-    points: base.points?.map((point) => rotatePoint(point, panel.rotation)),
-    anchors: base.anchors.map((anchor) => {
-      const rotated = rotatePoint(anchor, panel.rotation);
-      return { x: rotated.x, y: rotated.y };
-    }),
-    labelOffset: rotatePoint(base.labelOffset, panel.rotation),
-  };
+  const rotation = normalizeRotation(panel.rotation);
+  const key = `${panel.type}:${rotation}`;
+  let geometry = geometryCache.get(key);
+  if (!geometry) {
+    const base = getPanelBaseGeometry(PANEL_TYPES[panel.type]);
+    geometry = {
+      width: base.width,
+      height: base.height,
+      path: base.path,
+      points: base.points ? base.points.map((point) => rotatePoint(point, rotation)) : undefined,
+      anchors: base.anchors.map((anchor) => rotatePoint(anchor, rotation)),
+      labelOffset: rotatePoint(base.labelOffset, rotation),
+    };
+    geometryCache.set(key, geometry);
+  }
+  return geometry;
 }
 
 function createPanel(type, x = 320, y = 260, rotation = 0) {
@@ -340,7 +436,7 @@ function getSelectedPanels() {
 
 function snapshotState() {
   return {
-    inventory: { ...state.inventory },
+    inventory: cloneInventory(state.inventory),
     panels: state.panels.map((panel) => ({ ...panel })),
     selectedId: state.selectedId,
     selectedIds: [...state.selectedIds],
@@ -360,7 +456,7 @@ function pushHistory() {
 function undoLastAction() {
   const snapshot = state.history.pop();
   if (!snapshot) return;
-  state.inventory = { ...snapshot.inventory };
+  state.inventory = cloneInventory(snapshot.inventory);
   state.panels = snapshot.panels.map((panel) => ({ ...panel }));
   state.selectedId = snapshot.selectedId;
   state.selectedIds = [...snapshot.selectedIds];
@@ -384,11 +480,36 @@ function getUsedCounts() {
 
 function applyAvailability() {
   const usedByType = {};
+  const usedByOrientation = { MG12: {}, MG13: {} };
 
   state.panels.forEach((panel) => {
-    usedByType[panel.type] = (usedByType[panel.type] || 0) + 1;
-    panel.available = usedByType[panel.type] <= (Number(state.inventory[panel.type]) || 0);
+    if (isShapedType(panel.type)) {
+      const orientation = getPanelOrientation(panel);
+      const counts = usedByOrientation[panel.type];
+      counts[orientation] = (counts[orientation] || 0) + 1;
+      panel.available = counts[orientation] <= getStock(panel.type, orientation);
+    } else {
+      usedByType[panel.type] = (usedByType[panel.type] || 0) + 1;
+      panel.available = usedByType[panel.type] <= getStock(panel.type);
+    }
   });
+}
+
+function getUsedOrientationCounts() {
+  const counts = {
+    MG9: 0,
+    MG12: { LU: 0, LD: 0, RU: 0, RD: 0 },
+    MG13: { LU: 0, LD: 0, RU: 0, RD: 0 },
+  };
+  state.panels.forEach((panel) => {
+    if (isShapedType(panel.type)) {
+      const orientation = getPanelOrientation(panel);
+      counts[panel.type][orientation] = (counts[panel.type][orientation] || 0) + 1;
+    } else if (panel.type === "MG9") {
+      counts.MG9 += 1;
+    }
+  });
+  return counts;
 }
 
 function getGlobalAnchors(panel) {
@@ -401,6 +522,10 @@ function getGlobalAnchors(panel) {
   }));
 }
 
+// Connection detection uses a uniform spatial hash so it scales ~linearly with
+// panel count instead of comparing every anchor against every other anchor.
+const CONNECTION_CELL = SNAP_DISTANCE_UNITS;
+
 function getConnectionMapForPanels(panels) {
   const panelConnections = new Map();
 
@@ -411,31 +536,45 @@ function getConnectionMapForPanels(panels) {
     });
   });
 
-  for (let i = 0; i < panels.length; i += 1) {
-    const panelA = panels[i];
-    const anchorsA = getGlobalAnchors(panelA);
+  if (panels.length <= 1) return panelConnections;
 
-    for (let j = i + 1; j < panels.length; j += 1) {
-      const panelB = panels[j];
-      const anchorsB = getGlobalAnchors(panelB);
-
-      anchorsA.forEach((anchorA) => {
-        anchorsB.forEach((anchorB) => {
-          if (Math.hypot(anchorA.x - anchorB.x, anchorA.y - anchorB.y) <= SNAP_DISTANCE_UNITS) {
-            panelConnections.get(panelA.id).anchorIndices.add(anchorA.index);
-            panelConnections.get(panelB.id).anchorIndices.add(anchorB.index);
-          }
-        });
-      });
-    }
-  }
-
-  if (panels.length > 1) {
-    panels.forEach((panel) => {
-      panelConnections.get(panel.id).connected =
-        panelConnections.get(panel.id).anchorIndices.size >= 2;
+  const buckets = new Map();
+  const anchors = [];
+  panels.forEach((panel) => {
+    getGlobalAnchors(panel).forEach((anchor) => {
+      anchors.push(anchor);
+      const key = `${Math.floor(anchor.x / CONNECTION_CELL)}:${Math.floor(anchor.y / CONNECTION_CELL)}`;
+      let bucket = buckets.get(key);
+      if (!bucket) {
+        bucket = [];
+        buckets.set(key, bucket);
+      }
+      bucket.push(anchor);
     });
-  }
+  });
+
+  anchors.forEach((anchor) => {
+    const cellX = Math.floor(anchor.x / CONNECTION_CELL);
+    const cellY = Math.floor(anchor.y / CONNECTION_CELL);
+    for (let gx = cellX - 1; gx <= cellX + 1; gx += 1) {
+      for (let gy = cellY - 1; gy <= cellY + 1; gy += 1) {
+        const bucket = buckets.get(`${gx}:${gy}`);
+        if (!bucket) continue;
+        for (const other of bucket) {
+          if (other.panelId === anchor.panelId) continue;
+          if (Math.hypot(anchor.x - other.x, anchor.y - other.y) <= SNAP_DISTANCE_UNITS) {
+            panelConnections.get(anchor.panelId).anchorIndices.add(anchor.index);
+            break;
+          }
+        }
+      }
+    }
+  });
+
+  panels.forEach((panel) => {
+    panelConnections.get(panel.id).connected =
+      panelConnections.get(panel.id).anchorIndices.size >= 2;
+  });
 
   return panelConnections;
 }
@@ -479,13 +618,53 @@ function duplicateSelectedPanel() {
   if (!selectedPanels.length) return;
   pushHistory();
   state.manualViewLocked = true;
-  const duplicates = selectedPanels.map((selected, index) =>
-    createPanel(selected.type, selected.x + PANEL_SIZE_UNITS, selected.y + index * HALF_PANEL, selected.rotation)
+  // Offset the whole selection by the same delta so the group keeps its exact
+  // relative spacing/rotation instead of drifting apart.
+  const offset = PANEL_SIZE_UNITS;
+  const duplicates = selectedPanels.map((selected) =>
+    createPanel(selected.type, selected.x + offset, selected.y + offset, selected.rotation)
   );
   state.panels.push(...duplicates);
   applyAvailability();
   state.selectedId = duplicates[0]?.id || null;
   state.selectedIds = duplicates.map((panel) => panel.id);
+  computeConnections();
+  render();
+}
+
+function copySelection() {
+  const selectedPanels = getSelectedPanels();
+  if (!selectedPanels.length) return;
+  const minX = Math.min(...selectedPanels.map((panel) => panel.x));
+  const minY = Math.min(...selectedPanels.map((panel) => panel.y));
+  state.clipboard = selectedPanels.map((panel) => ({
+    type: panel.type,
+    rotation: panel.rotation,
+    dx: panel.x - minX,
+    dy: panel.y - minY,
+  }));
+}
+
+function pasteClipboard() {
+  if (!state.clipboard || !state.clipboard.length) return;
+  pushHistory();
+  state.manualViewLocked = true;
+
+  const fallbackBase = getPanelById(state.selectedId) || state.panels[state.panels.length - 1];
+  const anchor = state.lastPointer || {
+    x: (fallbackBase?.x ?? 500) + PANEL_SIZE_UNITS,
+    y: (fallbackBase?.y ?? 500) + PANEL_SIZE_UNITS,
+  };
+  const originX = snapToIncrement(anchor.x, HALF_PANEL);
+  const originY = snapToIncrement(anchor.y, HALF_PANEL);
+
+  const pasted = state.clipboard.map((item) =>
+    createPanel(item.type, originX + item.dx, originY + item.dy, item.rotation)
+  );
+  state.panels.push(...pasted);
+  applyAvailability();
+  state.selectedId = pasted[0]?.id || null;
+  state.selectedIds = pasted.map((panel) => panel.id);
   computeConnections();
   render();
 }
@@ -555,28 +734,78 @@ function setPlacementMode(type = null) {
   renderSelectedMeta();
 }
 
+function refreshAfterInventoryChange() {
+  applyAvailability();
+  computeConnections();
+  renderInventory();
+  renderLibrary();
+  renderCanvas();
+}
+
 function renderInventory() {
   const usedCounts = getUsedCounts();
+  const usedOrientation = getUsedOrientationCounts();
   els.inventoryList.innerHTML = "";
 
   Object.values(PANEL_TYPES).forEach((type) => {
+    if (isShapedType(type.id)) {
+      const group = document.createElement("div");
+      group.className = "inventory-group";
+
+      const head = document.createElement("div");
+      head.className = "inventory-group-head";
+      const name = document.createElement("strong");
+      name.textContent = type.name;
+      const size = document.createElement("span");
+      size.textContent = `${type.widthMm} x ${type.heightMm} mm`;
+      head.append(name, size);
+      group.appendChild(head);
+
+      ORIENTATIONS.forEach((orientation) => {
+        const row = document.createElement("div");
+        row.className = "inventory-orient-row";
+
+        const label = document.createElement("span");
+        label.className = "orient-label";
+        label.textContent = `${orientation.icon} ${orientation.label}`;
+
+        const input = document.createElement("input");
+        input.type = "number";
+        input.min = "0";
+        input.step = "1";
+        input.value = getStock(type.id, orientation.key);
+        input.addEventListener("change", (event) => {
+          state.inventory[type.id][orientation.key] = Math.max(0, Number(event.target.value) || 0);
+          refreshAfterInventoryChange();
+        });
+
+        const used = usedOrientation[type.id][orientation.key] || 0;
+        const remaining = Math.max(getStock(type.id, orientation.key) - used, 0);
+        const counts = document.createElement("span");
+        counts.className = "orient-counts";
+        counts.textContent = `Used ${used} · Left ${remaining}`;
+
+        row.append(label, input, counts);
+        group.appendChild(row);
+      });
+
+      els.inventoryList.appendChild(group);
+      return;
+    }
+
     const row = els.inventoryRowTemplate.content.firstElementChild.cloneNode(true);
     row.querySelector(".inventory-name").textContent = type.name;
     row.querySelector(".inventory-size").textContent = `${type.widthMm} x ${type.heightMm} mm`;
 
     const input = row.querySelector("input");
-    input.value = state.inventory[type.id];
+    input.value = getStockTotal(type.id);
     input.addEventListener("change", (event) => {
       state.inventory[type.id] = Math.max(0, Number(event.target.value) || 0);
-      applyAvailability();
-      computeConnections();
-      renderInventory();
-      renderLibrary();
-      renderCanvas();
+      refreshAfterInventoryChange();
     });
 
     const used = usedCounts[type.id] || 0;
-    const remaining = Math.max((Number(state.inventory[type.id]) || 0) - used, 0);
+    const remaining = Math.max(getStockTotal(type.id) - used, 0);
     row.querySelector(".used-count").textContent = `Used: ${used}`;
     row.querySelector(".remaining-count").textContent = `Remaining: ${remaining}`;
     els.inventoryList.appendChild(row);
@@ -590,7 +819,7 @@ function renderLibrary() {
   Object.values(PANEL_TYPES).forEach((type) => {
     const card = els.libraryCardTemplate.content.firstElementChild.cloneNode(true);
     const shape = card.querySelector(".library-shape");
-    const remaining = Math.max((Number(state.inventory[type.id]) || 0) - (usedCounts[type.id] || 0), 0);
+    const remaining = Math.max(getStockTotal(type.id) - (usedCounts[type.id] || 0), 0);
 
     shape.dataset.shape = type.shapeKind === "rect" ? "rect" : type.shapeKind;
     shape.style.background = `linear-gradient(135deg, ${type.color}88, ${type.color}33)`;
@@ -638,64 +867,61 @@ function renderReplaceTypeLibrary() {
   });
 }
 
-function polygonPointsString(points, x, y) {
-  return points.map((point) => `${point.x + x},${point.y + y}`).join(" ");
-}
-
-function createShapeElement(panel, geometry) {
+// Panels render inside a `<g transform="translate(x y)">` with all child
+// geometry in local (rotation-baked) coordinates, so repositioning during a
+// drag only updates the group's transform instead of rebuilding child nodes.
+function buildPanelChildren(panel, options = {}) {
+  const { anchorClass = "anchor-point", connectedSet = null } = options;
   const type = PANEL_TYPES[panel.type];
+  const geometry = getGeometry(panel);
+  const fragment = document.createDocumentFragment();
 
   if (type.shapeKind === "sector") {
     const path = document.createElementNS(SVG_NS, "path");
     path.setAttribute("d", geometry.path);
-    path.setAttribute("transform", `translate(${panel.x} ${panel.y}) rotate(${panel.rotation})`);
+    if (panel.rotation) path.setAttribute("transform", `rotate(${normalizeRotation(panel.rotation)})`);
     path.setAttribute("class", "panel-shape");
     path.setAttribute("fill", type.color);
-    return path;
+    fragment.appendChild(path);
+  } else {
+    const polygon = document.createElementNS(SVG_NS, "polygon");
+    polygon.setAttribute("points", geometry.points.map((point) => `${point.x},${point.y}`).join(" "));
+    polygon.setAttribute("class", "panel-shape");
+    polygon.setAttribute("fill", type.color);
+    fragment.appendChild(polygon);
   }
 
-  const polygon = document.createElementNS(SVG_NS, "polygon");
-  polygon.setAttribute("points", polygonPointsString(geometry.points, panel.x, panel.y));
-  polygon.setAttribute("class", "panel-shape");
-  polygon.setAttribute("fill", type.color);
-  return polygon;
-}
-
-function createTextElement(panel, geometry) {
   const text = document.createElementNS(SVG_NS, "text");
-  text.setAttribute("x", panel.x + geometry.labelOffset.x);
-  text.setAttribute("y", panel.y + geometry.labelOffset.y);
+  text.setAttribute("x", geometry.labelOffset.x);
+  text.setAttribute("y", geometry.labelOffset.y);
   text.setAttribute("class", "panel-label");
   text.textContent = panel.type;
-  return text;
-}
+  fragment.appendChild(text);
 
-function createAnchors(panel, geometry) {
-  const fragment = document.createDocumentFragment();
-  const connectedAnchors = state.connectionMap.get(panel.id)?.anchorIndices ?? new Set();
-
+  const connected = connectedSet || state.connectionMap.get(panel.id)?.anchorIndices || new Set();
   geometry.anchors.forEach((anchor, index) => {
     const circle = document.createElementNS(SVG_NS, "circle");
-    circle.setAttribute("cx", panel.x + anchor.x);
-    circle.setAttribute("cy", panel.y + anchor.y);
+    circle.setAttribute("cx", anchor.x);
+    circle.setAttribute("cy", anchor.y);
     circle.setAttribute("r", 3.2);
-    circle.setAttribute("class", `anchor-point${connectedAnchors.has(index) ? " connected" : ""}`);
+    circle.setAttribute("class", `${anchorClass}${connected.has(index) ? " connected" : ""}`);
     fragment.appendChild(circle);
   });
+
   return fragment;
 }
 
-function createPreviewAnchors(panel, geometry, connectedIndices = new Set()) {
-  const fragment = document.createDocumentFragment();
-  geometry.anchors.forEach((anchor, index) => {
-    const circle = document.createElementNS(SVG_NS, "circle");
-    circle.setAttribute("cx", panel.x + anchor.x);
-    circle.setAttribute("cy", panel.y + anchor.y);
-    circle.setAttribute("r", 3.2);
-    circle.setAttribute("class", `preview-anchor${connectedIndices.has(index) ? " connected" : ""}`);
-    fragment.appendChild(circle);
-  });
-  return fragment;
+function panelClasses(panel) {
+  const isConnected = isPanelConnected(panel.id);
+  return [
+    "panel-group",
+    panel.id === state.selectedId ? "selected" : "",
+    state.selectedIds.includes(panel.id) && panel.id !== state.selectedId ? "multi-selected" : "",
+    panel.available === false ? "unavailable" : "",
+    !isConnected ? "disconnected" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 function getPlacementPreview(type, pointerX, pointerY, rotation = 0) {
@@ -793,55 +1019,64 @@ function renderCanvasPreview() {
   if (!state.placement.active || !state.placement.preview) return;
 
   const { panel, snapped, valid, connectedIndices } = state.placement.preview;
-  const geometry = getGeometry(panel);
   const group = document.createElementNS(SVG_NS, "g");
+  group.setAttribute("transform", `translate(${panel.x} ${panel.y})`);
   group.setAttribute(
     "class",
     `preview-group${snapped && valid ? " snap-ready" : ""}${valid ? "" : " invalid-preview"}`
   );
-  group.appendChild(createShapeElement(panel, geometry));
-  group.appendChild(createTextElement(panel, geometry));
-  group.appendChild(createPreviewAnchors(panel, geometry, connectedIndices));
+  group.appendChild(
+    buildPanelChildren(panel, { anchorClass: "preview-anchor", connectedSet: connectedIndices })
+  );
   els.canvasPreview.appendChild(group);
+}
+
+// Keep a stable id -> <g> map so full renders reuse existing nodes (and their
+// listeners) instead of tearing down and rebuilding the whole panel layer.
+const panelElements = new Map();
+
+function onPanelClick(event) {
+  event.stopPropagation();
+  if (suppressClick) {
+    suppressClick = false;
+    return;
+  }
+  const id = event.currentTarget.dataset.id;
+  setSelected(id, {
+    additive: event.shiftKey || event.ctrlKey || event.metaKey,
+    toggle: event.ctrlKey || event.metaKey,
+  });
+}
+
+function renderPanelElement(panel) {
+  let group = panelElements.get(panel.id);
+  if (!group) {
+    group = document.createElementNS(SVG_NS, "g");
+    group.dataset.id = panel.id;
+    group.addEventListener("pointerdown", onPanelPointerDown);
+    group.addEventListener("click", onPanelClick);
+    panelElements.set(panel.id, group);
+  }
+  group.setAttribute("class", panelClasses(panel));
+  group.setAttribute("transform", `translate(${panel.x} ${panel.y})`);
+  group.replaceChildren(buildPanelChildren(panel));
+  els.canvasPanels.appendChild(group);
+}
+
+function syncPanelElements() {
+  const alive = new Set(state.panels.map((panel) => panel.id));
+  panelElements.forEach((element, id) => {
+    if (!alive.has(id)) {
+      element.remove();
+      panelElements.delete(id);
+    }
+  });
+  state.panels.forEach((panel) => renderPanelElement(panel));
 }
 
 function renderCanvas() {
   computeConnections();
-  els.canvasPanels.innerHTML = "";
-
-  state.panels.forEach((panel) => {
-    const geometry = getGeometry(panel);
-    const isConnected = isPanelConnected(panel.id);
-    const classes = [
-      "panel-group",
-      panel.id === state.selectedId ? "selected" : "",
-      state.selectedIds.includes(panel.id) && panel.id !== state.selectedId ? "multi-selected" : "",
-      panel.available === false ? "unavailable" : "",
-      !isConnected ? "disconnected" : "",
-    ]
-      .filter(Boolean)
-      .join(" ");
-
-    const group = document.createElementNS(SVG_NS, "g");
-    group.dataset.id = panel.id;
-    group.setAttribute("class", classes);
-
-    group.appendChild(createShapeElement(panel, geometry));
-    group.appendChild(createTextElement(panel, geometry));
-    group.appendChild(createAnchors(panel, geometry));
-
-    group.addEventListener("pointerdown", onPanelPointerDown);
-    group.addEventListener("click", (event) => {
-      event.stopPropagation();
-      setSelected(panel.id, {
-        additive: event.shiftKey || event.ctrlKey || event.metaKey,
-        toggle: event.ctrlKey || event.metaKey,
-      });
-    });
-
-    els.canvasPanels.appendChild(group);
-  });
-
+  syncPanelElements();
   renderCanvasPreview();
   updateMetrics();
   renderGuides();
@@ -1048,6 +1283,7 @@ function screenToSvg(event) {
 
 function onPanelPointerDown(event) {
   event.stopPropagation();
+  suppressClick = false;
   const group = event.currentTarget;
   const panel = getPanelById(group.dataset.id);
   if (!panel) return;
@@ -1075,27 +1311,150 @@ function onPanelPointerDown(event) {
   };
 }
 
-function onCanvasPointerMove(event) {
-  if (!state.drag) return;
-  const pointer = screenToSvg(event);
-  const dx = pointer.x - state.drag.originPointerX;
-  const dy = pointer.y - state.drag.originPointerY;
+function isBackgroundTarget(target) {
+  return !(target instanceof Element) || !target.closest(".panel-group");
+}
+
+let dragFramePending = false;
+// A drag that actually moved the pointer would otherwise be followed by a
+// synthetic click that collapses a multi-selection to a single panel; this flag
+// swallows exactly that one click.
+let suppressClick = false;
+
+function applyDrag() {
+  dragFramePending = false;
+  if (!state.drag || !state.drag.lastPointer) return;
+  const dx = state.drag.lastPointer.x - state.drag.originPointerX;
+  const dy = state.drag.lastPointer.y - state.drag.originPointerY;
+  if (Math.hypot(dx, dy) > 2) state.drag.moved = true;
   state.drag.originalPanels.forEach((original) => {
     const panel = getPanelById(original.id);
     if (!panel) return;
     panel.x = original.x + dx;
     panel.y = original.y + dy;
+    const element = panelElements.get(panel.id);
+    if (element) element.setAttribute("transform", `translate(${panel.x} ${panel.y})`);
   });
-  computeConnections();
-  renderCanvas();
+  renderGuides();
   renderSelectedMeta();
 }
 
-function onCanvasHover(event) {
-  if (!state.placement.active || state.drag) return;
+// During a drag we only move existing DOM nodes (transform) and defer the
+// expensive connection recompute until the pointer is released; movement is
+// coalesced with requestAnimationFrame.
+function handleDragMove(event) {
+  state.drag.lastPointer = screenToSvg(event);
+  if (dragFramePending) return;
+  dragFramePending = true;
+  requestAnimationFrame(applyDrag);
+}
+
+function finishDrag() {
+  state.drag.panelIds.forEach((panelId) => {
+    const panel = getPanelById(panelId);
+    if (!panel) return;
+    snapPanel(panel, PLACEMENT_LOCK_DISTANCE);
+  });
+  computeConnections();
+  if (state.drag.moved) suppressClick = true;
+  state.drag = null;
+  render();
+}
+
+function renderMarquee() {
+  els.canvasMarquee.innerHTML = "";
+  const marquee = state.marquee;
+  if (!marquee || !marquee.moved) return;
+  const rect = document.createElementNS(SVG_NS, "rect");
+  rect.setAttribute("x", Math.min(marquee.startX, marquee.x));
+  rect.setAttribute("y", Math.min(marquee.startY, marquee.y));
+  rect.setAttribute("width", Math.abs(marquee.x - marquee.startX));
+  rect.setAttribute("height", Math.abs(marquee.y - marquee.startY));
+  rect.setAttribute("class", "marquee-rect");
+  els.canvasMarquee.appendChild(rect);
+}
+
+function handleMarqueeMove(event) {
   const pointer = screenToSvg(event);
-  state.placement.pointer = pointer;
-  state.placement.preview = getPlacementPreview(state.placement.type, pointer.x, pointer.y);
+  const marquee = state.marquee;
+  marquee.x = pointer.x;
+  marquee.y = pointer.y;
+  if (!marquee.moved && Math.hypot(marquee.x - marquee.startX, marquee.y - marquee.startY) > 4) {
+    marquee.moved = true;
+  }
+  renderMarquee();
+}
+
+function finalizeMarquee() {
+  const marquee = state.marquee;
+  state.marquee = null;
+  els.canvasMarquee.innerHTML = "";
+  if (!marquee.moved) {
+    if (!marquee.additive) clearSelection();
+    return;
+  }
+  const minX = Math.min(marquee.startX, marquee.x);
+  const maxX = Math.max(marquee.startX, marquee.x);
+  const minY = Math.min(marquee.startY, marquee.y);
+  const maxY = Math.max(marquee.startY, marquee.y);
+  const selected = new Set(marquee.additive ? state.selectedIds : []);
+  state.panels.forEach((panel) => {
+    const box = getRotatedBoundingBox(panel);
+    if (box.minX <= maxX && box.maxX >= minX && box.minY <= maxY && box.maxY >= minY) {
+      selected.add(panel.id);
+    }
+  });
+  state.selectedIds = [...selected];
+  state.selectedId = state.selectedIds[0] || null;
+  renderSelectedMeta();
+  renderCanvas();
+}
+
+function onCanvasPointerDown(event) {
+  suppressClick = false;
+  if (event.button !== 0) return;
+  if (state.placement.active) return;
+  if (!isBackgroundTarget(event.target)) return;
+  const pointer = screenToSvg(event);
+  state.marquee = {
+    startX: pointer.x,
+    startY: pointer.y,
+    x: pointer.x,
+    y: pointer.y,
+    additive: event.shiftKey || event.ctrlKey || event.metaKey,
+    moved: false,
+  };
+}
+
+function onWindowPointerMove(event) {
+  if (state.marquee) {
+    handleMarqueeMove(event);
+    return;
+  }
+  if (state.drag) {
+    handleDragMove(event);
+  }
+}
+
+function onWindowPointerUp() {
+  if (state.marquee) {
+    finalizeMarquee();
+    return;
+  }
+  if (state.drag) {
+    finishDrag();
+  }
+}
+
+function onCanvasHover(event) {
+  state.lastPointer = screenToSvg(event);
+  if (!state.placement.active || state.drag) return;
+  state.placement.pointer = state.lastPointer;
+  state.placement.preview = getPlacementPreview(
+    state.placement.type,
+    state.lastPointer.x,
+    state.lastPointer.y
+  );
   renderCanvasPreview();
 }
 
@@ -1106,47 +1465,23 @@ function onCanvasLeave() {
   renderCanvasPreview();
 }
 
-function onCanvasPointerUp() {
-  if (!state.drag) return;
-  state.drag.panelIds.forEach((panelId) => {
-    const panel = getPanelById(panelId);
-    if (!panel) return;
-    snapPanel(panel, PLACEMENT_LOCK_DISTANCE);
-  });
-  computeConnections();
-
-  state.drag = null;
-  render();
-}
-
 function onCanvasClick(event) {
-  const isBackground =
-    event.target === els.canvas ||
-    event.target.classList.contains("canvas-bg") ||
-    event.target.classList.contains("canvas-grid") ||
-    event.target.classList.contains("canvas-subgrid");
-
-  if (isBackground && state.placement.active) {
-    const pointer = screenToSvg(event);
-    const preview = getPlacementPreview(state.placement.type, pointer.x, pointer.y);
-    if (!preview.valid) return;
-    pushHistory();
-    state.manualViewLocked = true;
-    const panel = createPanel(preview.panel.type, preview.panel.x, preview.panel.y, preview.panel.rotation);
-    state.panels.push(panel);
-    state.selectedId = panel.id;
-    state.selectedIds = [panel.id];
-    applyAvailability();
-    computeConnections();
-    state.placement.pointer = pointer;
-    state.placement.preview = getPlacementPreview(state.placement.type, pointer.x, pointer.y);
-    render();
-    return;
-  }
-
-  if (isBackground) {
-    clearSelection();
-  }
+  if (!state.placement.active) return;
+  if (!isBackgroundTarget(event.target)) return;
+  const pointer = screenToSvg(event);
+  const preview = getPlacementPreview(state.placement.type, pointer.x, pointer.y);
+  if (!preview.valid) return;
+  pushHistory();
+  state.manualViewLocked = true;
+  const panel = createPanel(preview.panel.type, preview.panel.x, preview.panel.y, preview.panel.rotation);
+  state.panels.push(panel);
+  state.selectedId = panel.id;
+  state.selectedIds = [panel.id];
+  applyAvailability();
+  computeConnections();
+  state.placement.pointer = pointer;
+  state.placement.preview = getPlacementPreview(state.placement.type, pointer.x, pointer.y);
+  render();
 }
 
 function snapPanel(panel, threshold = SNAP_DISTANCE_UNITS) {
@@ -1238,7 +1573,7 @@ function resetInventoryUsed() {
   state.panels = [];
   state.selectedId = null;
   state.selectedIds = [];
-  state.inventory = { ...defaultInventory };
+  state.inventory = cloneInventory(defaultInventory);
   applyAvailability();
   computeConnections();
   render();
@@ -1641,20 +1976,37 @@ function buildTextPanels() {
 }
 
 function checkStockForGeneratedPanels(generatedPanels) {
-  const requestedCounts = generatedPanels.reduce((counts, panel) => {
-    counts[panel.type] = (counts[panel.type] || 0) + 1;
-    return counts;
-  }, {});
+  const requestedCounts = {};
+  const requestedOrientation = { MG12: {}, MG13: {} };
 
-  const shortages = Object.keys(requestedCounts).filter(
-    (type) => requestedCounts[type] > (Number(state.inventory[type]) || 0)
-  );
+  generatedPanels.forEach((panel) => {
+    requestedCounts[panel.type] = (requestedCounts[panel.type] || 0) + 1;
+    if (isShapedType(panel.type)) {
+      const orientation = getPanelOrientation(panel);
+      const counts = requestedOrientation[panel.type];
+      counts[orientation] = (counts[orientation] || 0) + 1;
+    }
+  });
 
-  return { requestedCounts, shortages };
+  const shortages = [];
+  if ((requestedCounts.MG9 || 0) > getStockTotal("MG9")) {
+    shortages.push({ label: "MG9", need: requestedCounts.MG9, have: getStockTotal("MG9") });
+  }
+  SHAPED_TYPES.forEach((type) => {
+    ORIENTATIONS.forEach((orientation) => {
+      const need = requestedOrientation[type][orientation.key] || 0;
+      const have = getStock(type, orientation.key);
+      if (need > have) {
+        shortages.push({ label: `${type} ${orientation.icon}`, need, have });
+      }
+    });
+  });
+
+  return { requestedCounts, requestedOrientation, shortages };
 }
 
 function optimizeGeneratedPanels(generatedPanels) {
-  const workingPanels = generatedPanels.map((panel) => ({ ...panel }));
+  const workingPanels = generatedPanels.map((panel, index) => ({ ...panel, id: `gen-${index}` }));
   let changed = true;
   while (changed) {
     changed = false;
@@ -1706,7 +2058,7 @@ function updateTextSummary(generatedPanels, targetWidthPanels, targetHeightPanel
   const widthMm = (Math.max(...xs) - Math.min(...xs)) / MM_TO_UNITS + PANEL_SIZE_MM;
   const heightMm = (Math.max(...ys) - Math.min(...ys)) / MM_TO_UNITS + PANEL_SIZE_MM;
   const unavailableCount = stockCheck.shortages.reduce(
-    (total, type) => total + (stockCheck.requestedCounts[type] - (Number(state.inventory[type]) || 0)),
+    (total, shortage) => total + Math.max(0, shortage.need - shortage.have),
     0
   );
   const stockText = unavailableCount > 0 ? ` ${unavailableCount} panels shown as unavailable.` : "";
@@ -1728,7 +2080,7 @@ function generateTextLayout(showAlerts = false, recordHistory = true) {
 
   if (showAlerts && stockCheck.shortages.length) {
     const shortageText = stockCheck.shortages
-      .map((type) => `${type}: need ${stockCheck.requestedCounts[type]}, have ${state.inventory[type] || 0}`)
+      .map((shortage) => `${shortage.label}: need ${shortage.need}, have ${shortage.have}`)
       .join("\n");
     window.alert(`Layout generated with unavailable panels shown in grey.\n${shortageText}`);
   }
@@ -1747,7 +2099,7 @@ function scheduleAutoGenerate() {
 }
 
 function clearAndResetInventory() {
-  state.inventory = { ...defaultInventory };
+  state.inventory = cloneInventory(defaultInventory);
   clearLayout();
 }
 
@@ -1755,7 +2107,7 @@ function serializeProject() {
   return {
     version: APP_VERSION,
     projectName: sanitizeProjectName(state.projectName),
-    inventory: { ...state.inventory },
+    inventory: cloneInventory(state.inventory),
     panels: state.panels.map((panel) => ({
       type: panel.type,
       x: panel.x,
@@ -1796,7 +2148,7 @@ function restoreProject(project) {
   if (!Array.isArray(project.panels)) throw new Error("Project file is missing panels.");
 
   state.projectName = sanitizeProjectName(project.projectName);
-  state.inventory = { ...defaultInventory, ...(project.inventory || {}) };
+  state.inventory = normalizeInventory({ ...DEFAULT_INVENTORY_RAW, ...(project.inventory || {}) });
   state.collapsedSections = {
     textLayout: false,
     selectedPanel: false,
@@ -1848,22 +2200,35 @@ function openProjectFile(event) {
   reader.readAsText(file);
 }
 
-async function saveToPdf() {
-  const jspdfApi = window.jspdf?.jsPDF;
-  if (!jspdfApi) {
-    window.alert("PDF export library did not load.");
-    return;
-  }
-
-  const bounds = getLayoutBounds();
-  const serializer = new XMLSerializer();
+// Shared SVG -> raster canvas pipeline for both PDF and PNG export. The grid
+// and sub-grid rects only get their fill from external CSS, so a plain clone
+// serialized without stylesheets defaults them to black and paints the whole
+// page. We explicitly neutralize those fills (root cause of the "black
+// background" export) and inline the styling the raster needs.
+async function rasterizeLayout({ transparent = false, panelColor = null } = {}) {
   const clone = els.canvas.cloneNode(true);
-  const previewLayer = clone.querySelector("#canvasPreview");
-  if (previewLayer) previewLayer.innerHTML = "";
-  const background = clone.querySelector("#canvasBackground");
-  if (background) background.setAttribute("style", "fill:#ffffff");
-  clone.setAttribute("xmlns", SVG_NS);
+  clone.querySelector("#canvasPreview")?.replaceChildren();
+  clone.querySelector("#canvasGuides")?.replaceChildren();
+  clone.querySelector("#canvasMarquee")?.replaceChildren();
+  clone.querySelector("#canvasGrid")?.setAttribute("fill", "none");
+  clone.querySelector("#canvasSubgrid")?.setAttribute("fill", "none");
 
+  const background = clone.querySelector("#canvasBackground");
+  if (background) background.setAttribute("fill", transparent ? "none" : "#ffffff");
+
+  clone.querySelectorAll(".panel-shape").forEach((shape) => {
+    if (panelColor) {
+      shape.setAttribute("fill", panelColor);
+      shape.setAttribute("stroke", "none");
+    } else {
+      shape.setAttribute("stroke", "#1f2826");
+      shape.setAttribute("stroke-width", "2.2");
+    }
+  });
+  clone.querySelectorAll(".anchor-point").forEach((anchor) => anchor.remove());
+  if (panelColor) clone.querySelectorAll(".panel-label").forEach((label) => label.remove());
+
+  clone.setAttribute("xmlns", SVG_NS);
   const viewBox = els.canvas.getAttribute("viewBox") || "0 0 2400 1600";
   const [, , widthStr, heightStr] = viewBox.split(" ");
   const svgWidth = Number(widthStr) || 2400;
@@ -1871,9 +2236,8 @@ async function saveToPdf() {
   clone.setAttribute("width", String(svgWidth));
   clone.setAttribute("height", String(svgHeight));
 
-  const svgMarkup = serializer.serializeToString(clone);
-  const svgBlob = new Blob([svgMarkup], { type: "image/svg+xml;charset=utf-8" });
-  const url = URL.createObjectURL(svgBlob);
+  const svgMarkup = new XMLSerializer().serializeToString(clone);
+  const url = URL.createObjectURL(new Blob([svgMarkup], { type: "image/svg+xml;charset=utf-8" }));
 
   try {
     const image = await new Promise((resolve, reject) => {
@@ -1888,59 +2252,103 @@ async function saveToPdf() {
     canvas.width = Math.max(1, Math.round(svgWidth * scale));
     canvas.height = Math.max(1, Math.round(svgHeight * scale));
     const context = canvas.getContext("2d");
-    context.fillStyle = "#ffffff";
-    context.fillRect(0, 0, canvas.width, canvas.height);
-    context.drawImage(image, 0, 0, canvas.width, canvas.height);
-
-    const pdf = new jspdfApi({
-      orientation: canvas.width >= canvas.height ? "landscape" : "portrait",
-      unit: "pt",
-      format: "a4",
-    });
-
-    const pageWidth = pdf.internal.pageSize.getWidth();
-    const pageHeight = pdf.internal.pageSize.getHeight();
-    const margin = 36;
-    const headerY = 36;
-    const projectName = sanitizeProjectName(state.projectName);
-    const widthText = bounds.hasPanels ? mmToMetersText(unitsToMm(bounds.width)) : "0.00 m";
-    const heightText = bounds.hasPanels ? mmToMetersText(unitsToMm(bounds.height)) : "0.00 m";
-
-    pdf.setFont("helvetica", "bold");
-    pdf.setFontSize(18);
-    pdf.text(projectName, margin, headerY);
-    pdf.setFont("helvetica", "normal");
-    pdf.setFontSize(10);
-    pdf.text(`Version v${APP_VERSION}`, margin, headerY + 16);
-    pdf.text(`Layout width: ${widthText}`, margin, headerY + 34);
-    pdf.text(`Layout height: ${heightText}`, margin, headerY + 48);
-    pdf.text(`Panels used: ${state.panels.length}`, margin, headerY + 62);
-
-    const imageTop = headerY + 80;
-    const availableWidth = pageWidth - margin * 2;
-    const availableHeight = pageHeight - imageTop - margin;
-    const imageRatio = canvas.width / canvas.height;
-    let imageWidth = availableWidth;
-    let imageHeight = imageWidth / imageRatio;
-    if (imageHeight > availableHeight) {
-      imageHeight = availableHeight;
-      imageWidth = imageHeight * imageRatio;
+    if (!transparent) {
+      context.fillStyle = "#ffffff";
+      context.fillRect(0, 0, canvas.width, canvas.height);
     }
-
-    pdf.addImage(
-      canvas.toDataURL("image/png"),
-      "PNG",
-      margin,
-      imageTop,
-      imageWidth,
-      imageHeight,
-      undefined,
-      "FAST"
-    );
-    pdf.save(`${projectName}-v${APP_VERSION}.pdf`);
+    context.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return canvas;
   } finally {
     URL.revokeObjectURL(url);
   }
+}
+
+async function saveToPdf() {
+  const jspdfApi = window.jspdf?.jsPDF;
+  if (!jspdfApi) {
+    window.alert("PDF export library did not load.");
+    return;
+  }
+
+  const bounds = getLayoutBounds();
+  const canvas = await rasterizeLayout({ transparent: false });
+
+  const pdf = new jspdfApi({
+    orientation: canvas.width >= canvas.height ? "landscape" : "portrait",
+    unit: "pt",
+    format: "a4",
+  });
+
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const margin = 36;
+  const headerY = 36;
+  const projectName = sanitizeProjectName(state.projectName);
+  const widthText = bounds.hasPanels ? mmToMetersText(unitsToMm(bounds.width)) : "0.00 m";
+  const heightText = bounds.hasPanels ? mmToMetersText(unitsToMm(bounds.height)) : "0.00 m";
+  const used = getUsedOrientationCounts();
+  const orientationLine = (counts) =>
+    `LU ${counts.LU}   LD ${counts.LD}   RU ${counts.RU}   RD ${counts.RD}`;
+
+  pdf.setFont("helvetica", "bold");
+  pdf.setFontSize(18);
+  pdf.text(projectName, margin, headerY);
+  pdf.setFont("helvetica", "normal");
+  pdf.setFontSize(10);
+  pdf.text(`Version v${APP_VERSION}`, margin, headerY + 16);
+  pdf.text(`Layout width: ${widthText}`, margin, headerY + 34);
+  pdf.text(`Layout height: ${heightText}`, margin, headerY + 48);
+  pdf.setFont("helvetica", "bold");
+  pdf.text(`Total panels used: ${state.panels.length}`, margin, headerY + 66);
+  pdf.setFont("helvetica", "normal");
+  pdf.text(`MG9 squares: ${used.MG9}`, margin, headerY + 82);
+  pdf.text(`MG12 triangles  -  ${orientationLine(used.MG12)}`, margin, headerY + 96);
+  pdf.text(`MG13 quarter-circles  -  ${orientationLine(used.MG13)}`, margin, headerY + 110);
+
+  const imageTop = headerY + 128;
+  const availableWidth = pageWidth - margin * 2;
+  const availableHeight = pageHeight - imageTop - margin;
+  const imageRatio = canvas.width / canvas.height;
+  let imageWidth = availableWidth;
+  let imageHeight = imageWidth / imageRatio;
+  if (imageHeight > availableHeight) {
+    imageHeight = availableHeight;
+    imageWidth = imageHeight * imageRatio;
+  }
+
+  pdf.addImage(
+    canvas.toDataURL("image/png"),
+    "PNG",
+    margin,
+    imageTop,
+    imageWidth,
+    imageHeight,
+    undefined,
+    "FAST"
+  );
+  pdf.save(`${projectName}-v${APP_VERSION}.pdf`);
+}
+
+async function exportPngPreview() {
+  if (!state.panels.length) {
+    window.alert("Add panels to the layout before exporting a PNG preview.");
+    return;
+  }
+  const color = els.pngColorInput?.value || "#e48a52";
+  const canvas = await rasterizeLayout({ transparent: true, panelColor: color });
+  const projectName = sanitizeProjectName(state.projectName);
+  canvas.toBlob((blob) => {
+    if (!blob) {
+      window.alert("Could not generate the PNG preview.");
+      return;
+    }
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `${projectName}-preview.png`;
+    link.click();
+    URL.revokeObjectURL(url);
+  }, "image/png");
 }
 
 function wireLiveTextEvents() {
@@ -1959,10 +2367,11 @@ function wireLiveTextEvents() {
 
 function wireEvents() {
   els.canvas.addEventListener("click", onCanvasClick);
+  els.canvas.addEventListener("pointerdown", onCanvasPointerDown);
   els.canvas.addEventListener("pointermove", onCanvasHover);
   els.canvas.addEventListener("pointerleave", onCanvasLeave);
-  window.addEventListener("pointermove", onCanvasPointerMove);
-  window.addEventListener("pointerup", onCanvasPointerUp);
+  window.addEventListener("pointermove", onWindowPointerMove);
+  window.addEventListener("pointerup", onWindowPointerUp);
 
   els.generateTextBtn.addEventListener("click", () => generateTextLayout(true));
   els.loadReferenceBtn.addEventListener("click", () => {
@@ -1974,9 +2383,14 @@ function wireEvents() {
   els.savePdfBtn.addEventListener("click", () => {
     void saveToPdf();
   });
+  els.exportPngBtn?.addEventListener("click", () => {
+    void exportPngPreview();
+  });
   els.undoBtn.addEventListener("click", undoLastAction);
   els.rotateBtn.addEventListener("click", rotateSelectedPanel);
   els.duplicateBtn.addEventListener("click", duplicateSelectedPanel);
+  els.copyBtn?.addEventListener("click", copySelection);
+  els.pasteBtn?.addEventListener("click", pasteClipboard);
   els.deleteBtn.addEventListener("click", removeSelectedPanel);
   els.clearLayoutBtn.addEventListener("click", clearLayout);
   els.resetInventoryBtn.addEventListener("click", clearAndResetInventory);
@@ -2015,6 +2429,22 @@ function wireEvents() {
     if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "p") {
       event.preventDefault();
       void saveToPdf();
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "c") {
+      if (typing) return;
+      if (getSelectedPanels().length) {
+        event.preventDefault();
+        copySelection();
+      }
+      return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "v") {
+      if (typing) return;
+      if (state.clipboard?.length) {
+        event.preventDefault();
+        pasteClipboard();
+      }
       return;
     }
     if (event.key === "Escape") {

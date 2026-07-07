@@ -13,7 +13,7 @@
           <p class="eyebrow">YES TECH Layout Tool</p>
           <div class="title-row">
             <h1>MG9 Creative Designer</h1>
-            <span id="appVersionBadge" class="version-badge">v1.1.0</span>
+            <span id="appVersionBadge" class="version-badge">v1.2.0</span>
           </div>
           <p class="intro">
             Build stock-aware lettering and custom layouts with MG9 square panels, MG12 triangle
@@ -75,6 +75,13 @@ STUVWXYZ</textarea>
               <button id="savePdfBtn" class="secondary-btn" type="button">Save to PDF</button>
               <button id="clearLayoutBtn" class="danger-btn" type="button">Clear Layout</button>
             </div>
+            <div class="png-export-row">
+              <label class="png-color-label field">
+                <span>Preview colour</span>
+                <input id="pngColorInput" type="color" value="#e48a52" />
+              </label>
+              <button id="exportPngBtn" class="secondary-btn" type="button">Export PNG</button>
+            </div>
             <p class="microcopy">
               Height updates the layout live. Width is worked out from the chosen letters. Edit
               `glyph-library.js` to fine-tune any character.
@@ -91,6 +98,10 @@ STUVWXYZ</textarea>
             <div id="selectedMeta" class="selected-meta empty">Select a panel on the canvas.</div>
             <div class="controls-stack">
               <button id="rotateBtn" class="secondary-btn" type="button">Rotate 90 deg</button>
+              <div class="button-row">
+                <button id="copyBtn" class="secondary-btn" type="button">Copy</button>
+                <button id="pasteBtn" class="secondary-btn" type="button">Paste</button>
+              </div>
               <button id="duplicateBtn" class="secondary-btn" type="button">Duplicate</button>
               <button id="deleteBtn" class="danger-btn" type="button">Delete</button>
             </div>
@@ -101,7 +112,8 @@ STUVWXYZ</textarea>
               <div id="replaceTypeLibrary" class="library-grid replace-grid"></div>
             </div>
             <p class="microcopy">
-              Shift-click or Ctrl-click to multi-select. Replace type swaps the selected panel or group in place.
+              Shift-click, Ctrl-click, or drag a marquee on empty canvas to multi-select. Copy then
+              Paste (Ctrl+V) drops the group at your cursor. Replace type swaps the selection in place.
             </p>
           </div>
         </section>
@@ -144,11 +156,14 @@ STUVWXYZ</textarea>
               <div><strong>D</strong><span>Duplicate selected panels</span></div>
               <div><strong>Delete</strong><span>Delete selected panels</span></div>
               <div><strong>Ctrl/Cmd + Z</strong><span>Undo</span></div>
+              <div><strong>Ctrl/Cmd + C</strong><span>Copy selected panels</span></div>
+              <div><strong>Ctrl/Cmd + V</strong><span>Paste at cursor</span></div>
               <div><strong>Ctrl/Cmd + S</strong><span>Save project JSON</span></div>
               <div><strong>Ctrl/Cmd + O</strong><span>Open project JSON</span></div>
               <div><strong>Ctrl/Cmd + P</strong><span>Save PDF</span></div>
               <div><strong>G</strong><span>Refresh text layout</span></div>
               <div><strong>1 / 2 / 3</strong><span>Arm MG9 / MG12 / MG13 placement</span></div>
+              <div><strong>Drag empty canvas</strong><span>Marquee select</span></div>
               <div><strong>Shift-click</strong><span>Add to selection</span></div>
               <div><strong>Ctrl/Cmd-click</strong><span>Toggle selection</span></div>
             </div>
@@ -206,6 +221,7 @@ STUVWXYZ</textarea>
             <g id="canvasGuides"></g>
             <g id="canvasPreview"></g>
             <g id="canvasPanels"></g>
+            <g id="canvasMarquee"></g>
           </svg>
         </div>
       </main>
