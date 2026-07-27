@@ -13,7 +13,7 @@
           <p class="eyebrow">YES TECH Layout Tool</p>
           <div class="title-row">
             <h1>MG9 Creative Designer</h1>
-            <span id="appVersionBadge" class="version-badge">v1.2.0</span>
+            <span id="appVersionBadge" class="version-badge">v1.3.0</span>
           </div>
           <p class="intro">
             Build stock-aware lettering and custom layouts with MG9 square panels, MG12 triangle
@@ -97,7 +97,14 @@ STUVWXYZ</textarea>
           <div class="section-body" data-section-body="selectedPanel">
             <div id="selectedMeta" class="selected-meta empty">Select a panel on the canvas.</div>
             <div class="controls-stack">
-              <button id="rotateBtn" class="secondary-btn" type="button">Rotate 90 deg</button>
+              <div class="button-row">
+                <button id="rotateFineBtn" class="secondary-btn" type="button">Rotate 45°</button>
+                <button id="rotateBtn" class="secondary-btn" type="button">Rotate 90°</button>
+              </div>
+              <label class="field angle-field">
+                <span>Angle (°) — custom</span>
+                <input id="rotationInput" type="number" min="0" max="359" step="1" value="0" disabled />
+              </label>
               <div class="button-row">
                 <button id="copyBtn" class="secondary-btn" type="button">Copy</button>
                 <button id="pasteBtn" class="secondary-btn" type="button">Paste</button>
@@ -112,8 +119,9 @@ STUVWXYZ</textarea>
               <div id="replaceTypeLibrary" class="library-grid replace-grid"></div>
             </div>
             <p class="microcopy">
-              Shift-click, Ctrl-click, or drag a marquee on empty canvas to multi-select. Copy then
-              Paste (Ctrl+V) drops the group at your cursor. Replace type swaps the selection in place.
+              Shift-click, Ctrl-click, or drag a marquee on empty canvas to multi-select. Rotate in
+              90°/45° steps or type a custom angle. Copy then Paste (Ctrl+V) drops the group at your
+              cursor. Replace type swaps the selection in place.
             </p>
           </div>
         </section>
@@ -152,7 +160,8 @@ STUVWXYZ</textarea>
           <div class="section-body" data-section-body="help" hidden>
             <div class="shortcut-list">
               <div><strong>Esc</strong><span>Cancel placement mode</span></div>
-              <div><strong>R</strong><span>Rotate selected panels</span></div>
+              <div><strong>R</strong><span>Rotate selected panels 90°</span></div>
+              <div><strong>Shift + R</strong><span>Rotate selected panels 45°</span></div>
               <div><strong>D</strong><span>Duplicate selected panels</span></div>
               <div><strong>Delete</strong><span>Delete selected panels</span></div>
               <div><strong>Ctrl/Cmd + Z</strong><span>Undo</span></div>

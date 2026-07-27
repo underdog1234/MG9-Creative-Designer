@@ -303,6 +303,15 @@ h2 {
   gap: 10px;
 }
 
+.angle-field {
+  margin: 2px 0;
+}
+
+.angle-field input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
 .png-export-row {
   display: flex;
   align-items: flex-end;

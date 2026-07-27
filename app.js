@@ -1,5 +1,5 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
-const APP_VERSION = "1.2.0";
+const APP_VERSION = "1.3.0";
 const MM_TO_UNITS = 0.25;
 const PANEL_SIZE_MM = 500;
 const PANEL_SIZE_UNITS = PANEL_SIZE_MM * MM_TO_UNITS;
@@ -7,6 +7,7 @@ const HALF_PANEL = PANEL_SIZE_UNITS / 2;
 const SNAP_DISTANCE_UNITS = 8;
 const PLACEMENT_LOCK_DISTANCE = 52;
 const ROTATION_STEP = 90;
+const ROTATION_STEP_FINE = 45;
 const CANVAS_PADDING = 180;
 const AUTO_REFRESH_DELAY_MS = 120;
 const REFERENCE_SAMPLE_TEXT =
@@ -247,6 +248,8 @@ const els = {
   exportPngBtn: document.querySelector("#exportPngBtn"),
   pngColorInput: document.querySelector("#pngColorInput"),
   rotateBtn: document.querySelector("#rotateBtn"),
+  rotateFineBtn: document.querySelector("#rotateFineBtn"),
+  rotationInput: document.querySelector("#rotationInput"),
   duplicateBtn: document.querySelector("#duplicateBtn"),
   copyBtn: document.querySelector("#copyBtn"),
   pasteBtn: document.querySelector("#pasteBtn"),
@@ -397,7 +400,10 @@ function getPanelBaseGeometry(panelType) {
 const geometryCache = new Map();
 
 function getGeometry(panel) {
-  const rotation = normalizeRotation(panel.rotation);
+  // Rotate by the panel's true angle (any degree, not just multiples of 90) so
+  // custom / 45-degree rotations render correctly. Orientation-stock bucketing
+  // still uses normalizeRotation elsewhere.
+  const rotation = (((Number(panel.rotation) || 0) % 360) + 360) % 360;
   const key = `${panel.type}:${rotation}`;
   let geometry = geometryCache.get(key);
   if (!geometry) {
@@ -669,14 +675,29 @@ function pasteClipboard() {
   render();
 }
 
-function rotateSelectedPanel() {
+function rotateSelectedPanel(step = ROTATION_STEP) {
   const selectedPanels = getSelectedPanels();
   if (!selectedPanels.length) return;
   pushHistory();
   state.manualViewLocked = true;
   selectedPanels.forEach((selected) => {
-    selected.rotation = (selected.rotation + ROTATION_STEP) % 360;
+    selected.rotation = (((selected.rotation + step) % 360) + 360) % 360;
   });
+  applyAvailability();
+  computeConnections();
+  render();
+}
+
+function setSelectedRotation(angle) {
+  const selectedPanels = getSelectedPanels();
+  if (!selectedPanels.length) return;
+  const normalized = (((Math.round(Number(angle) || 0) % 360) + 360) % 360);
+  pushHistory();
+  state.manualViewLocked = true;
+  selectedPanels.forEach((selected) => {
+    selected.rotation = normalized;
+  });
+  applyAvailability();
   computeConnections();
   render();
 }
@@ -879,7 +900,7 @@ function buildPanelChildren(panel, options = {}) {
   if (type.shapeKind === "sector") {
     const path = document.createElementNS(SVG_NS, "path");
     path.setAttribute("d", geometry.path);
-    if (panel.rotation) path.setAttribute("transform", `rotate(${normalizeRotation(panel.rotation)})`);
+    if (panel.rotation) path.setAttribute("transform", `rotate(${panel.rotation})`);
     path.setAttribute("class", "panel-shape");
     path.setAttribute("fill", type.color);
     fragment.appendChild(path);
@@ -1221,9 +1242,21 @@ function updateMetrics() {
     disconnectedCount > 0 ? `${disconnectedCount} disconnected` : "All connected";
 }
 
+function syncRotationInput(selectedPanels) {
+  if (!els.rotationInput) return;
+  if (!selectedPanels.length) {
+    els.rotationInput.disabled = true;
+    els.rotationInput.value = 0;
+    return;
+  }
+  els.rotationInput.disabled = false;
+  els.rotationInput.value = Math.round(selectedPanels[0].rotation) % 360;
+}
+
 function renderSelectedMeta() {
   const selectedPanels = getSelectedPanels();
   const panel = getPanelById(state.selectedId);
+  syncRotationInput(selectedPanels);
   if (!panel || !selectedPanels.length) {
     els.selectedMeta.classList.add("empty");
     els.selectedMeta.textContent = state.placement.active
@@ -2387,7 +2420,9 @@ function wireEvents() {
     void exportPngPreview();
   });
   els.undoBtn.addEventListener("click", undoLastAction);
-  els.rotateBtn.addEventListener("click", rotateSelectedPanel);
+  els.rotateBtn.addEventListener("click", () => rotateSelectedPanel(ROTATION_STEP));
+  els.rotateFineBtn?.addEventListener("click", () => rotateSelectedPanel(ROTATION_STEP_FINE));
+  els.rotationInput?.addEventListener("change", (event) => setSelectedRotation(event.target.value));
   els.duplicateBtn.addEventListener("click", duplicateSelectedPanel);
   els.copyBtn?.addEventListener("click", copySelection);
   els.pasteBtn?.addEventListener("click", pasteClipboard);
@@ -2453,7 +2488,9 @@ function wireEvents() {
     }
     if (typing) return;
     if (event.key === "Delete" || event.key === "Backspace") removeSelectedPanel();
-    if (event.key.toLowerCase() === "r") rotateSelectedPanel();
+    if (event.key.toLowerCase() === "r") {
+      rotateSelectedPanel(event.shiftKey ? ROTATION_STEP_FINE : ROTATION_STEP);
+    }
     if (event.key.toLowerCase() === "d") duplicateSelectedPanel();
     if (event.key.toLowerCase() === "g") generateTextLayout(true);
     if (event.key === "1") setPlacementMode("MG9");

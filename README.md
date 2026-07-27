@@ -2,6 +2,11 @@
 
 Small browser-based planning tool for YES TECH `MG9`, `MG12`, and `MG13` LED panels.
 
+## What's New in v1.3.0
+
+- Panels can now be rotated in 45° steps or to any custom angle: use the **Rotate 45°** / **Rotate 90°** buttons, type an exact value in the **Angle (°)** field, or press `R` (90°) / `Shift+R` (45°)
+- Shaped panels rotated off-axis are counted against their nearest 90° orientation bucket for stock
+
 ## What's New in v1.2.0
 
 - Triangle panels no longer join on their long (hypotenuse) side — only on their two legs
