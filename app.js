@@ -1,5 +1,5 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
-const APP_VERSION = "1.3.0";
+const APP_VERSION = "1.4.0";
 const MM_TO_UNITS = 0.25;
 const PANEL_SIZE_MM = 500;
 const PANEL_SIZE_UNITS = PANEL_SIZE_MM * MM_TO_UNITS;
@@ -668,6 +668,7 @@ function pasteClipboard() {
     createPanel(item.type, originX + item.dx, originY + item.dy, item.rotation)
   );
   state.panels.push(...pasted);
+  snapPanelGroup(pasted.map((panel) => panel.id), PLACEMENT_LOCK_DISTANCE);
   applyAvailability();
   state.selectedId = pasted[0]?.id || null;
   state.selectedIds = pasted.map((panel) => panel.id);
@@ -1288,8 +1289,13 @@ function renderSelectedMeta() {
   `;
 }
 
+const CHANGELOG_URL = "https://github.com/underdog1234/MG9-Creative-Designer/releases";
+
 function render() {
   els.appVersionBadge.textContent = `v${APP_VERSION}`;
+  if (els.appVersionBadge instanceof HTMLAnchorElement) {
+    els.appVersionBadge.href = `${CHANGELOG_URL}/tag/v${APP_VERSION}`;
+  }
   els.projectNameInput.value = state.projectName;
   renderSections();
   renderInventory();
@@ -1383,11 +1389,7 @@ function handleDragMove(event) {
 }
 
 function finishDrag() {
-  state.drag.panelIds.forEach((panelId) => {
-    const panel = getPanelById(panelId);
-    if (!panel) return;
-    snapPanel(panel, PLACEMENT_LOCK_DISTANCE);
-  });
+  snapPanelGroup(state.drag.panelIds, PLACEMENT_LOCK_DISTANCE);
   computeConnections();
   if (state.drag.moved) suppressClick = true;
   state.drag = null;
@@ -1546,6 +1548,67 @@ function snapPanel(panel, threshold = SNAP_DISTANCE_UNITS) {
   } else {
     panel.x = snapToIncrement(panel.x, HALF_PANEL);
     panel.y = snapToIncrement(panel.y, HALF_PANEL);
+  }
+}
+
+// Snaps a whole selection as one rigid body: finds the single best anchor
+// match between any panel in the group and any panel outside it, then moves
+// every panel in the group by that same offset. Snapping each panel
+// independently (the old behaviour) let different panels in a dragged group
+// lock onto different neighbours, which silently pulled the group out of
+// alignment with itself.
+function snapPanelGroup(panelIds, threshold = SNAP_DISTANCE_UNITS) {
+  const idSet = new Set(panelIds);
+  const groupPanels = panelIds.map((id) => getPanelById(id)).filter(Boolean);
+  if (!groupPanels.length) return;
+
+  if (groupPanels.length === 1) {
+    snapPanel(groupPanels[0], threshold);
+    return;
+  }
+
+  const externalPanels = state.panels.filter((panel) => !idSet.has(panel.id));
+  let bestMatch = null;
+
+  groupPanels.forEach((panel) => {
+    const geometry = getGeometry(panel);
+    externalPanels.forEach((other) => {
+      const otherGeometry = getGeometry(other);
+      geometry.anchors.forEach((anchor) => {
+        otherGeometry.anchors.forEach((otherAnchor) => {
+          const currentAnchor = { x: panel.x + anchor.x, y: panel.y + anchor.y };
+          const targetAnchor = { x: other.x + otherAnchor.x, y: other.y + otherAnchor.y };
+          const dx = targetAnchor.x - currentAnchor.x;
+          const dy = targetAnchor.y - currentAnchor.y;
+          const distance = Math.hypot(dx, dy);
+
+          if (distance <= threshold && (!bestMatch || distance < bestMatch.distance)) {
+            bestMatch = { dx, dy, distance };
+          }
+        });
+      });
+    });
+  });
+
+  if (bestMatch) {
+    groupPanels.forEach((panel) => {
+      panel.x += bestMatch.dx;
+      panel.y += bestMatch.dy;
+    });
+    return;
+  }
+
+  // No neighbour close enough: settle the group onto the half-panel grid as a
+  // unit, using one panel as the alignment reference so relative spacing
+  // inside the group is preserved exactly.
+  const reference = groupPanels[0];
+  const dx = snapToIncrement(reference.x, HALF_PANEL) - reference.x;
+  const dy = snapToIncrement(reference.y, HALF_PANEL) - reference.y;
+  if (dx || dy) {
+    groupPanels.forEach((panel) => {
+      panel.x += dx;
+      panel.y += dy;
+    });
   }
 }
 

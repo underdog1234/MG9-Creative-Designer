@@ -90,6 +90,15 @@ h1 {
   color: var(--accent-deep);
   font-size: 0.82rem;
   font-weight: 700;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 140ms ease, transform 140ms ease;
+}
+
+.version-badge:hover,
+.version-badge:focus-visible {
+  background: rgba(207, 92, 54, 0.18);
+  transform: translateY(-1px);
 }
 
 h2 {

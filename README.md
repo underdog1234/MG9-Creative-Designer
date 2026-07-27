@@ -2,6 +2,11 @@
 
 Small browser-based planning tool for YES TECH `MG9`, `MG12`, and `MG13` LED panels.
 
+## What's New in v1.4.0
+
+- The version badge is now a link to the GitHub release/changelog for the running version
+- Fixed group snapping: dragging or pasting multiple selected panels now snaps the whole group together as one rigid unit when it lands near other panels, instead of letting individual panels in the group snap to different neighbours and fall out of alignment
+
 ## What's New in v1.3.0
 
 - Panels can now be rotated in 45° steps or to any custom angle: use the **Rotate 45°** / **Rotate 90°** buttons, type an exact value in the **Angle (°)** field, or press `R` (90°) / `Shift+R` (45°)
