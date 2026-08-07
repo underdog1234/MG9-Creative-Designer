@@ -2,6 +2,10 @@
 
 Small browser-based planning tool for YES TECH `MG9`, `MG12`, and `MG13` LED panels.
 
+## What's New in v1.6.1
+
+- Fixed the width/height dimension-line arrowheads: the arrows nearest the top-left corner of the layout (the start of each measurement line) were pointing inward instead of outward, because the shared SVG arrow marker didn't reverse orientation for the start of a line. Both dimension lines now point outward at both ends, as intended
+
 ## What's New in v1.6.0
 
 - Added a Bulk Grid Placement tool (Panel Library section): enter columns x rows (MG9 squares only, up to 60 per side / 1200 panels total), click **Create Grid** to arm placement mode, and a semi-transparent preview of the whole grid follows the cursor — snapping to the canvas grid and nearby panels exactly like a single panel. Click once to drop the entire grid at once; placement mode ends automatically afterwards, and every placed panel behaves exactly like an individually added one (selectable, draggable, counted in stock, etc.)

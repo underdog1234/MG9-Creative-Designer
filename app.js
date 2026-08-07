@@ -1,5 +1,5 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
-const APP_VERSION = "1.6.0";
+const APP_VERSION = "1.6.1";
 const MM_TO_UNITS = 0.25;
 const PANEL_SIZE_MM = 500;
 const PANEL_SIZE_UNITS = PANEL_SIZE_MM * MM_TO_UNITS;
