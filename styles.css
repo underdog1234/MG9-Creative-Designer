@@ -1,15 +1,15 @@
 :root {
-  color-scheme: light;
-  --paper: rgba(255, 252, 246, 0.82);
-  --paper-strong: #fffaf2;
-  --ink: #1f2826;
-  --muted: #61706d;
-  --line: rgba(31, 40, 38, 0.13);
-  --accent: #cf5c36;
-  --accent-deep: #8f2d14;
-  --olive: #6a7f40;
-  --danger: #b33125;
-  --shadow: 0 18px 45px rgba(48, 38, 18, 0.12);
+  color-scheme: dark;
+  --paper: rgba(32, 36, 46, 0.82);
+  --paper-strong: #242833;
+  --ink: #e9ecf3;
+  --muted: #9aa3b8;
+  --line: rgba(255, 255, 255, 0.1);
+  --accent: #e2793f;
+  --accent-deep: #f2a877;
+  --olive: #9dc06a;
+  --danger: #e5695c;
+  --shadow: 0 18px 45px rgba(0, 0, 0, 0.45);
   --radius: 22px;
   --ui: "Segoe UI", "Aptos", sans-serif;
   --display: "Trebuchet MS", "Gill Sans", sans-serif;
@@ -19,15 +19,39 @@
   box-sizing: border-box;
 }
 
+*,
+:root {
+  scrollbar-color: rgba(255, 255, 255, 0.22) rgba(255, 255, 255, 0.04);
+  scrollbar-width: thin;
+}
+
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+
+::-webkit-scrollbar-track {
+  background: rgba(255, 255, 255, 0.03);
+}
+
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.18);
+  border-radius: 8px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.28);
+}
+
 body {
   margin: 0;
   min-height: 100vh;
   font-family: var(--ui);
   color: var(--ink);
   background:
-    radial-gradient(circle at top left, rgba(207, 92, 54, 0.16), transparent 28%),
-    radial-gradient(circle at top right, rgba(106, 127, 64, 0.14), transparent 32%),
-    linear-gradient(180deg, #f7f4ec 0%, #efe8db 100%);
+    radial-gradient(circle at top left, rgba(226, 121, 63, 0.14), transparent 30%),
+    radial-gradient(circle at top right, rgba(120, 150, 90, 0.11), transparent 34%),
+    linear-gradient(180deg, #14161c 0%, #1b1e27 100%);
 }
 
 .app-shell {
@@ -50,7 +74,7 @@ body {
 
 .panel {
   background: var(--paper);
-  border: 1px solid rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--radius);
   padding: 18px;
   box-shadow: var(--shadow);
@@ -86,7 +110,7 @@ h1 {
 .version-badge {
   padding: 6px 10px;
   border-radius: 999px;
-  background: rgba(31, 40, 38, 0.08);
+  background: rgba(255, 255, 255, 0.08);
   color: var(--accent-deep);
   font-size: 0.82rem;
   font-weight: 700;
@@ -97,7 +121,7 @@ h1 {
 
 .version-badge:hover,
 .version-badge:focus-visible {
-  background: rgba(207, 92, 54, 0.18);
+  background: rgba(226, 121, 63, 0.24);
   transform: translateY(-1px);
 }
 
@@ -161,7 +185,7 @@ h2 {
   width: 24px;
   height: 24px;
   border-radius: 999px;
-  background: rgba(31, 40, 38, 0.08);
+  background: rgba(255, 255, 255, 0.08);
   color: var(--muted);
 }
 
@@ -239,9 +263,24 @@ h2 {
   width: 100%;
   padding: 10px 12px;
   border-radius: 12px;
-  border: 1px solid rgba(31, 40, 38, 0.15);
-  background: white;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--ink);
   font: inherit;
+}
+
+.inventory-input input:focus,
+.field input:focus,
+.field textarea:focus,
+.field select:focus {
+  outline: none;
+  border-color: rgba(226, 121, 63, 0.6);
+  background: rgba(255, 255, 255, 0.07);
+}
+
+.field select option {
+  background: var(--paper-strong);
+  color: var(--ink);
 }
 
 .field textarea {
@@ -301,8 +340,9 @@ h2 {
   width: 100%;
   padding: 6px 8px;
   border-radius: 10px;
-  border: 1px solid rgba(31, 40, 38, 0.15);
-  background: white;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--ink);
   font: inherit;
 }
 
@@ -366,8 +406,8 @@ button:hover {
 }
 
 .library-card:hover {
-  border-color: rgba(207, 92, 54, 0.45);
-  box-shadow: 0 12px 28px rgba(48, 38, 18, 0.08);
+  border-color: rgba(226, 121, 63, 0.5);
+  box-shadow: 0 12px 28px rgba(0, 0, 0, 0.3);
 }
 
 .library-card:disabled {
@@ -376,9 +416,9 @@ button:hover {
 }
 
 .library-card.active {
-  border-color: rgba(207, 92, 54, 0.78);
-  box-shadow: 0 12px 28px rgba(207, 92, 54, 0.16);
-  background: rgba(255, 241, 233, 0.95);
+  border-color: rgba(226, 121, 63, 0.8);
+  box-shadow: 0 12px 28px rgba(226, 121, 63, 0.2);
+  background: rgba(226, 121, 63, 0.16);
 }
 
 .library-card.small-card {
@@ -436,8 +476,8 @@ button:hover {
   margin: 0 0 12px;
   padding: 10px 12px;
   border-radius: 14px;
-  background: rgba(106, 127, 64, 0.12);
-  color: #355226;
+  background: rgba(157, 192, 106, 0.16);
+  color: #c3e29b;
   font-size: 0.9rem;
 }
 
@@ -461,24 +501,32 @@ button {
   width: 100%;
   background: linear-gradient(135deg, var(--accent), #e38a56);
   color: white;
-  box-shadow: 0 12px 26px rgba(207, 92, 54, 0.22);
+  box-shadow: 0 12px 26px rgba(226, 121, 63, 0.28);
 }
 
 .secondary-btn {
-  background: rgba(31, 40, 38, 0.06);
+  background: rgba(255, 255, 255, 0.07);
   color: var(--ink);
 }
 
+.secondary-btn:hover {
+  background: rgba(255, 255, 255, 0.12);
+}
+
 .danger-btn {
-  background: rgba(179, 49, 37, 0.1);
+  background: rgba(229, 105, 92, 0.16);
   color: var(--danger);
+}
+
+.danger-btn:hover {
+  background: rgba(229, 105, 92, 0.24);
 }
 
 .pill {
   padding: 5px 10px;
   border-radius: 999px;
   font-size: 0.76rem;
-  background: rgba(106, 127, 64, 0.14);
+  background: rgba(157, 192, 106, 0.18);
   color: var(--olive);
 }
 
@@ -497,6 +545,16 @@ button {
 
 .replace-panel-type {
   margin-top: 12px;
+}
+
+.bulk-grid-tool {
+  margin-top: 16px;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+}
+
+.bulk-grid-tool .primary-btn {
+  margin-bottom: 8px;
 }
 
 .workspace {
@@ -548,8 +606,8 @@ button {
   overflow: auto;
   border-radius: 28px;
   background:
-    linear-gradient(135deg, rgba(255, 255, 255, 0.62), rgba(255, 252, 246, 0.22)),
-    linear-gradient(180deg, rgba(91, 118, 121, 0.08), rgba(245, 238, 223, 0.72));
+    linear-gradient(135deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.01)),
+    linear-gradient(180deg, rgba(20, 22, 28, 0.92), rgba(13, 15, 19, 0.96));
   box-shadow: var(--shadow);
 }
 
@@ -567,7 +625,7 @@ button {
 }
 
 .canvas-bg {
-  fill: rgba(250, 248, 242, 0.96);
+  fill: #14161c;
 }
 
 .canvas-grid {
@@ -579,12 +637,12 @@ button {
 }
 
 #gridPattern path {
-  stroke: rgba(31, 40, 38, 0.08);
+  stroke: rgba(255, 255, 255, 0.07);
   stroke-width: 1;
 }
 
 #subGridPattern path {
-  stroke: rgba(31, 40, 38, 0.035);
+  stroke: rgba(255, 255, 255, 0.032);
   stroke-width: 0.6;
 }
 
@@ -593,20 +651,20 @@ button {
 }
 
 .panel-shape {
-  stroke: rgba(31, 40, 38, 0.28);
+  stroke: rgba(255, 255, 255, 0.32);
   stroke-width: 2.2;
 }
 
 .panel-group.selected .panel-shape {
-  stroke: #0f1312;
+  stroke: #ffffff;
   stroke-width: 4.5;
-  filter: drop-shadow(0 12px 20px rgba(12, 14, 12, 0.24));
+  filter: drop-shadow(0 12px 20px rgba(0, 0, 0, 0.55));
 }
 
 .panel-group.multi-selected .panel-shape {
-  stroke: #254f7a;
+  stroke: #7fb0e6;
   stroke-width: 4;
-  filter: drop-shadow(0 8px 16px rgba(37, 79, 122, 0.2));
+  filter: drop-shadow(0 8px 16px rgba(127, 176, 230, 0.35));
 }
 
 .panel-group.disconnected .panel-shape {
@@ -620,16 +678,16 @@ button {
 }
 
 .panel-group.unavailable .panel-shape {
-  fill: #bcc2c6;
-  stroke: #7f888d;
+  fill: #7d838c;
+  stroke: #565c64;
 }
 
 .panel-group.unavailable .panel-label {
-  fill: #4f565a;
+  fill: #22262c;
 }
 
 .panel-group.push-out .panel-shape {
-  stroke: #4a2a86;
+  stroke: #d9bdfb;
   stroke-width: 3;
   stroke-dasharray: 10 6;
 }
@@ -640,11 +698,11 @@ button {
 }
 
 .anchor-point {
-  fill: rgba(31, 40, 38, 0.46);
+  fill: rgba(255, 255, 255, 0.55);
 }
 
 .anchor-point.connected {
-  fill: #3a7a2a;
+  fill: #59c93c;
 }
 
 .panel-label {
@@ -670,13 +728,13 @@ button {
 
 .preview-group .panel-shape {
   opacity: 0.55;
-  stroke: rgba(31, 40, 38, 0.45);
+  stroke: rgba(255, 255, 255, 0.5);
   stroke-dasharray: 8 6;
 }
 
 .preview-group.snap-ready .panel-shape {
-  stroke: #2d7a35;
-  fill: rgba(112, 195, 102, 0.38) !important;
+  stroke: #59c93c;
+  fill: rgba(112, 195, 102, 0.4) !important;
 }
 
 .preview-group.invalid-preview .panel-shape {
@@ -689,15 +747,15 @@ button {
 }
 
 .preview-anchor {
-  fill: rgba(31, 40, 38, 0.42);
+  fill: rgba(255, 255, 255, 0.5);
 }
 
 .preview-anchor.connected {
-  fill: #2d7a35;
+  fill: #59c93c;
 }
 
 .marquee-rect {
-  fill: rgba(207, 92, 54, 0.12);
+  fill: rgba(226, 121, 63, 0.14);
   stroke: var(--accent);
   stroke-width: 2.5;
   stroke-dasharray: 8 6;
@@ -706,7 +764,7 @@ button {
 
 .guide-line,
 .guide-arrow {
-  stroke: rgba(31, 40, 38, 0.5);
+  stroke: rgba(255, 255, 255, 0.55);
   stroke-width: 3;
   fill: none;
 }
@@ -717,14 +775,14 @@ button {
 }
 
 .guide-label {
-  fill: rgba(31, 40, 38, 0.8);
+  fill: rgba(255, 255, 255, 0.85);
   font-family: var(--ui);
   font-size: 28px;
   font-weight: 700;
 }
 
 .marker-fill {
-  fill: rgba(31, 40, 38, 0.6);
+  fill: rgba(255, 255, 255, 0.65);
 }
 
 @media (max-width: 1120px) {

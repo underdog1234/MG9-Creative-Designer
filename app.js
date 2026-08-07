@@ -1,5 +1,5 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
-const APP_VERSION = "1.5.0";
+const APP_VERSION = "1.6.0";
 const MM_TO_UNITS = 0.25;
 const PANEL_SIZE_MM = 500;
 const PANEL_SIZE_UNITS = PANEL_SIZE_MM * MM_TO_UNITS;
@@ -10,6 +10,8 @@ const ROTATION_STEP = 90;
 const ROTATION_STEP_FINE = 45;
 const CANVAS_PADDING = 180;
 const AUTO_REFRESH_DELAY_MS = 120;
+const MAX_GRID_DIMENSION = 60;
+const MAX_GRID_CELLS = 1200;
 const REFERENCE_SAMPLE_TEXT =
   window.REFERENCE_SAMPLE_TEXT ||
   `123456789
@@ -215,6 +217,7 @@ const state = {
   placement: {
     active: false,
     type: null,
+    grid: null,
     pointer: null,
     preview: null,
   },
@@ -225,6 +228,9 @@ const els = {
   inventoryList: document.querySelector("#inventoryList"),
   library: document.querySelector("#library"),
   replaceTypeLibrary: document.querySelector("#replaceTypeLibrary"),
+  gridColsInput: document.querySelector("#gridColsInput"),
+  gridRowsInput: document.querySelector("#gridRowsInput"),
+  createGridBtn: document.querySelector("#createGridBtn"),
   canvas: document.querySelector("#layoutCanvas"),
   canvasPanels: document.querySelector("#canvasPanels"),
   canvasGuides: document.querySelector("#canvasGuides"),
@@ -464,6 +470,7 @@ function snapshotState() {
     placement: {
       active: state.placement.active,
       type: state.placement.type,
+      grid: state.placement.grid,
     },
   };
 }
@@ -483,6 +490,7 @@ function undoLastAction() {
   state.projectName = snapshot.projectName || "untitled-layout";
   state.placement.active = snapshot.placement?.active ?? false;
   state.placement.type = snapshot.placement?.type ?? null;
+  state.placement.grid = snapshot.placement?.grid ?? null;
   state.placement.preview = null;
   state.placement.pointer = null;
   els.projectNameInput.value = state.projectName;
@@ -761,14 +769,40 @@ function renderSections() {
   });
 }
 
-function setPlacementMode(type = null) {
+function resetPlacement() {
+  state.placement.active = false;
+  state.placement.type = null;
+  state.placement.grid = null;
+  state.placement.pointer = null;
+  state.placement.preview = null;
+}
+
+function setPlacementMode(type = null, gridConfig = null) {
   state.placement.active = Boolean(type);
   state.placement.type = type;
+  state.placement.grid = gridConfig;
   state.placement.pointer = null;
   state.placement.preview = null;
   renderLibrary();
   renderCanvasPreview();
   renderSelectedMeta();
+}
+
+function startGridPlacement() {
+  const clamp = (value, min, max) => Math.min(max, Math.max(min, Math.round(value) || min));
+  const cols = clamp(Number(els.gridColsInput?.value), 1, MAX_GRID_DIMENSION);
+  const rows = clamp(Number(els.gridRowsInput?.value), 1, MAX_GRID_DIMENSION);
+
+  if (cols * rows > MAX_GRID_CELLS) {
+    window.alert(
+      `That grid would be ${cols * rows} panels, which is too large for one placement (limit ${MAX_GRID_CELLS}). Reduce the columns or rows.`
+    );
+    return;
+  }
+
+  if (els.gridColsInput) els.gridColsInput.value = cols;
+  if (els.gridRowsInput) els.gridRowsInput.value = rows;
+  setPlacementMode("MG9", { cols, rows });
 }
 
 function refreshAfterInventoryChange() {
@@ -1079,9 +1113,65 @@ function getPlacementPreview(type, pointerX, pointerY, rotation = 0) {
   };
 }
 
+// The grid's top-left cell reuses the normal single-panel snap logic (anchor
+// matching against existing panels, falling back to the half-panel grid), so
+// the whole grid inherits the same connector-snap and grid-snap behaviour for
+// free. Every other cell is just an offset from that anchored corner.
+function getGridPlacementPreview(cols, rows, pointerX, pointerY) {
+  const origin = getPlacementPreview("MG9", pointerX, pointerY, 0);
+  const cells = [];
+
+  for (let row = 0; row < rows; row += 1) {
+    for (let col = 0; col < cols; col += 1) {
+      cells.push({
+        x: origin.panel.x + col * PANEL_SIZE_UNITS,
+        y: origin.panel.y + row * PANEL_SIZE_UNITS,
+      });
+    }
+  }
+
+  const overlaps = cells.some((cell) =>
+    state.panels.some(
+      (panel) => Math.abs(panel.x - cell.x) < SNAP_DISTANCE_UNITS && Math.abs(panel.y - cell.y) < SNAP_DISTANCE_UNITS
+    )
+  );
+
+  return {
+    cells,
+    snapped: origin.snapped,
+    valid: origin.valid && !overlaps,
+  };
+}
+
+function renderGridPreview(preview) {
+  const group = document.createElementNS(SVG_NS, "g");
+  group.setAttribute(
+    "class",
+    `preview-group grid-preview-group${preview.snapped && preview.valid ? " snap-ready" : ""}${
+      preview.valid ? "" : " invalid-preview"
+    }`
+  );
+  preview.cells.forEach((cell) => {
+    const rect = document.createElementNS(SVG_NS, "rect");
+    rect.setAttribute("x", cell.x - HALF_PANEL);
+    rect.setAttribute("y", cell.y - HALF_PANEL);
+    rect.setAttribute("width", PANEL_SIZE_UNITS);
+    rect.setAttribute("height", PANEL_SIZE_UNITS);
+    rect.setAttribute("class", "panel-shape");
+    rect.setAttribute("fill", PANEL_TYPES.MG9.color);
+    group.appendChild(rect);
+  });
+  els.canvasPreview.appendChild(group);
+}
+
 function renderCanvasPreview() {
   els.canvasPreview.innerHTML = "";
   if (!state.placement.active || !state.placement.preview) return;
+
+  if (state.placement.grid) {
+    renderGridPreview(state.placement.preview);
+    return;
+  }
 
   const { panel, snapped, valid, connectedIndices } = state.placement.preview;
   const group = document.createElementNS(SVG_NS, "g");
@@ -1360,8 +1450,11 @@ function renderSelectedMeta() {
   syncPushOutButton(selectedPanels);
   if (!panel || !selectedPanels.length) {
     els.selectedMeta.classList.add("empty");
+    const gridConfig = state.placement.grid;
     els.selectedMeta.textContent = state.placement.active
-      ? `Placement mode: ${state.placement.type}. Click the canvas to place panels or press Esc to cancel.`
+      ? gridConfig
+        ? `Grid placement mode: ${gridConfig.cols} x ${gridConfig.rows} MG9 grid. Click the canvas to place it (placement mode ends automatically) or press Esc to cancel.`
+        : `Placement mode: ${state.placement.type}. Click the canvas to place panels or press Esc to cancel.`
       : "Select a panel on the canvas.";
     return;
   }
@@ -1589,11 +1682,14 @@ function onCanvasHover(event) {
   state.lastPointer = screenToSvg(event);
   if (!state.placement.active || state.drag) return;
   state.placement.pointer = state.lastPointer;
-  state.placement.preview = getPlacementPreview(
-    state.placement.type,
-    state.lastPointer.x,
-    state.lastPointer.y
-  );
+  state.placement.preview = state.placement.grid
+    ? getGridPlacementPreview(
+        state.placement.grid.cols,
+        state.placement.grid.rows,
+        state.lastPointer.x,
+        state.lastPointer.y
+      )
+    : getPlacementPreview(state.placement.type, state.lastPointer.x, state.lastPointer.y);
   renderCanvasPreview();
 }
 
@@ -1608,6 +1704,27 @@ function onCanvasClick(event) {
   if (!state.placement.active) return;
   if (!isBackgroundTarget(event.target)) return;
   const pointer = screenToSvg(event);
+
+  if (state.placement.grid) {
+    const { cols, rows } = state.placement.grid;
+    const preview = getGridPlacementPreview(cols, rows, pointer.x, pointer.y);
+    if (!preview.valid) return;
+    pushHistory();
+    state.manualViewLocked = true;
+    const newPanels = preview.cells.map((cell) => createPanel("MG9", cell.x, cell.y, 0));
+    state.panels.push(...newPanels);
+    state.selectedId = newPanels[newPanels.length - 1]?.id || null;
+    state.selectedIds = newPanels.map((item) => item.id);
+    applyAvailability();
+    computeConnections();
+    // Bulk placement is a one-shot action: place the whole grid, then drop
+    // out of placement mode automatically (unlike single-panel placement,
+    // which stays armed for placing several in a row).
+    resetPlacement();
+    render();
+    return;
+  }
+
   const preview = getPlacementPreview(state.placement.type, pointer.x, pointer.y);
   if (!preview.valid) return;
   pushHistory();
@@ -1751,10 +1868,7 @@ function findPlacementForNewPanel(type, rotation = 0) {
 function clearLayout() {
   pushHistory();
   state.manualViewLocked = false;
-  state.placement.active = false;
-  state.placement.type = null;
-  state.placement.pointer = null;
-  state.placement.preview = null;
+  resetPlacement();
   state.panels = [];
   state.selectedId = null;
   state.selectedIds = [];
@@ -1766,10 +1880,7 @@ function clearLayout() {
 function resetInventoryUsed() {
   pushHistory();
   state.manualViewLocked = false;
-  state.placement.active = false;
-  state.placement.type = null;
-  state.placement.pointer = null;
-  state.placement.preview = null;
+  resetPlacement();
   state.panels = [];
   state.selectedId = null;
   state.selectedIds = [];
@@ -2269,10 +2380,7 @@ function updateTextSummary(generatedPanels, targetWidthPanels, targetHeightPanel
 function generateTextLayout(showAlerts = false, recordHistory = true) {
   if (recordHistory) pushHistory();
   state.manualViewLocked = false;
-  state.placement.active = false;
-  state.placement.type = null;
-  state.placement.pointer = null;
-  state.placement.preview = null;
+  resetPlacement();
   const { generatedPanels, targetWidthPanels, targetHeightPanels, fromLibrary } = buildTextPanels();
   const optimizedPanels = fromLibrary ? generatedPanels : optimizeGeneratedPanels(generatedPanels);
   const stockCheck = checkStockForGeneratedPanels(optimizedPanels);
@@ -2382,10 +2490,7 @@ function restoreProject(project) {
   state.selectedId = null;
   state.selectedIds = [];
   state.manualViewLocked = false;
-  state.placement.active = false;
-  state.placement.type = null;
-  state.placement.pointer = null;
-  state.placement.preview = null;
+  resetPlacement();
   applyAvailability();
   computeConnections();
   render();
@@ -2639,6 +2744,7 @@ function wireEvents() {
   els.copyBtn?.addEventListener("click", copySelection);
   els.pasteBtn?.addEventListener("click", pasteClipboard);
   els.deleteBtn.addEventListener("click", removeSelectedPanel);
+  els.createGridBtn?.addEventListener("click", startGridPlacement);
   els.clearLayoutBtn.addEventListener("click", clearLayout);
   els.resetInventoryBtn.addEventListener("click", clearAndResetInventory);
   els.projectFileInput.addEventListener("change", openProjectFile);

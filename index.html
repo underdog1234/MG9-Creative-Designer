@@ -4,6 +4,9 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>YES TECH LED Layout Designer</title>
+    <meta name="theme-color" content="#181c24" />
+    <link rel="icon" type="image/svg+xml" href="./favicon.svg" />
+    <link rel="mask-icon" href="./favicon.svg" color="#181c24" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -16,11 +19,11 @@
             <a
               id="appVersionBadge"
               class="version-badge"
-              href="https://github.com/underdog1234/MG9-Creative-Designer/releases/tag/v1.5.0"
+              href="https://github.com/underdog1234/MG9-Creative-Designer/releases/tag/v1.6.0"
               target="_blank"
               rel="noopener"
               title="View changelog on GitHub"
-              >v1.5.0</a
+              >v1.6.0</a
             >
           </div>
           <p class="intro">
@@ -147,6 +150,28 @@ STUVWXYZ</textarea>
               Click a panel to arm placement mode, then click the canvas to place it. Press `Esc` to cancel placement.
             </p>
             <div id="library" class="library-grid"></div>
+
+            <div class="bulk-grid-tool">
+              <div class="section-heading compact">
+                <h2>Bulk Grid Placement</h2>
+              </div>
+              <div class="two-col">
+                <label class="field">
+                  <span>Columns</span>
+                  <input id="gridColsInput" type="number" min="1" max="60" step="1" value="20" />
+                </label>
+                <label class="field">
+                  <span>Rows</span>
+                  <input id="gridRowsInput" type="number" min="1" max="60" step="1" value="5" />
+                </label>
+              </div>
+              <button id="createGridBtn" class="primary-btn" type="button">Create Grid</button>
+              <p class="microcopy">
+                MG9 squares only. Move the semi-transparent preview into place and click once to drop
+                the whole grid — it snaps to the canvas grid and nearby panels just like a single
+                panel. Placement mode ends automatically after placing. Press `Esc` to cancel.
+              </p>
+            </div>
           </div>
         </section>
 

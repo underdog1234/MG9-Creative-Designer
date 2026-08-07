@@ -2,6 +2,12 @@
 
 Small browser-based planning tool for YES TECH `MG9`, `MG12`, and `MG13` LED panels.
 
+## What's New in v1.6.0
+
+- Added a Bulk Grid Placement tool (Panel Library section): enter columns x rows (MG9 squares only, up to 60 per side / 1200 panels total), click **Create Grid** to arm placement mode, and a semi-transparent preview of the whole grid follows the cursor — snapping to the canvas grid and nearby panels exactly like a single panel. Click once to drop the entire grid at once; placement mode ends automatically afterwards, and every placed panel behaves exactly like an individually added one (selectable, draggable, counted in stock, etc.)
+- Added a custom favicon/app icon so the tool looks polished in the browser tab and when saved as a shortcut
+- Reworked the whole UI into a dark theme (sidebar, toolbar, canvas, inputs, buttons, and connector/selection colours all retuned for a dark background)
+
 ## What's New in v1.5.0
 
 - Fixed canvas auto-expansion: the canvas now grows automatically whenever a panel is placed outside the current view, instead of staying frozen at its previous size. Existing panel positions are unaffected — only the visible/exportable canvas area grows
