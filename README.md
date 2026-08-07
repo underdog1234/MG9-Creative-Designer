@@ -2,6 +2,13 @@
 
 Small browser-based planning tool for YES TECH `MG9`, `MG12`, and `MG13` LED panels.
 
+## What's New in v1.5.0
+
+- Fixed canvas auto-expansion: the canvas now grows automatically whenever a panel is placed outside the current view, instead of staying frozen at its previous size. Existing panel positions are unaffected — only the visible/exportable canvas area grows
+- Added MG9 Push-Out panels: mark any MG9 as Push-Out from the Selected Panel panel (and revert it back to a standard MG9 the same way). Push-Out panels get a distinct violet colour and a "PO" label on the canvas, while still counting as normal MG9 panels for stock, orientation, and panel totals
+- PDF exports now show a total Push-Out count and a legend swatch explaining the Push-Out colour/label when any are present in the layout
+- Fixed PNG (and PDF) export cropping/scaling incorrectly when the canvas was zoomed in — exports now always render the complete layout at its actual bounds, regardless of the on-screen zoom level or scroll position
+
 ## What's New in v1.4.0
 
 - The version badge is now a link to the GitHub release/changelog for the running version

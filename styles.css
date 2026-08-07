@@ -628,6 +628,17 @@ button {
   fill: #4f565a;
 }
 
+.panel-group.push-out .panel-shape {
+  stroke: #4a2a86;
+  stroke-width: 3;
+  stroke-dasharray: 10 6;
+}
+
+.panel-group.push-out .panel-label {
+  fill: #ffffff;
+  font-weight: 800;
+}
+
 .anchor-point {
   fill: rgba(31, 40, 38, 0.46);
 }

@@ -1,5 +1,5 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
-const APP_VERSION = "1.4.0";
+const APP_VERSION = "1.5.0";
 const MM_TO_UNITS = 0.25;
 const PANEL_SIZE_MM = 500;
 const PANEL_SIZE_UNITS = PANEL_SIZE_MM * MM_TO_UNITS;
@@ -43,6 +43,12 @@ const PANEL_TYPES = {
     shapeKind: "sector",
   },
 };
+
+// Push-Out is a per-instance flag on MG9 panels (not a separate stock type),
+// so push-out panels stay in the normal MG9 pool for counts/stock/orientation
+// and only differ visually and in export labelling.
+const PUSH_OUT_COLOR = "#8a4fd6";
+const PUSH_OUT_LABEL = "PO";
 
 const LETTER_PATTERNS = {
   A: ["01110", "10001", "11111", "10001", "10001"],
@@ -251,6 +257,7 @@ const els = {
   rotateFineBtn: document.querySelector("#rotateFineBtn"),
   rotationInput: document.querySelector("#rotationInput"),
   duplicateBtn: document.querySelector("#duplicateBtn"),
+  pushOutBtn: document.querySelector("#pushOutBtn"),
   copyBtn: document.querySelector("#copyBtn"),
   pasteBtn: document.querySelector("#pasteBtn"),
   deleteBtn: document.querySelector("#deleteBtn"),
@@ -279,6 +286,12 @@ function unitsToMm(units) {
 
 function mmToMetersText(mm) {
   return `${(mm / 1000).toFixed(2)} m`;
+}
+
+function hexToRgb(hex) {
+  const clean = hex.replace("#", "");
+  const value = parseInt(clean, 16);
+  return [(value >> 16) & 255, (value >> 8) & 255, value & 255];
 }
 
 function sanitizeProjectName(name) {
@@ -421,13 +434,14 @@ function getGeometry(panel) {
   return geometry;
 }
 
-function createPanel(type, x = 320, y = 260, rotation = 0) {
+function createPanel(type, x = 320, y = 260, rotation = 0, pushOut = false) {
   return {
     id: `panel-${state.nextId++}`,
     type,
     x,
     y,
     rotation,
+    pushOut: type === "MG9" && Boolean(pushOut),
   };
 }
 
@@ -628,7 +642,7 @@ function duplicateSelectedPanel() {
   // relative spacing/rotation instead of drifting apart.
   const offset = PANEL_SIZE_UNITS;
   const duplicates = selectedPanels.map((selected) =>
-    createPanel(selected.type, selected.x + offset, selected.y + offset, selected.rotation)
+    createPanel(selected.type, selected.x + offset, selected.y + offset, selected.rotation, selected.pushOut)
   );
   state.panels.push(...duplicates);
   applyAvailability();
@@ -648,6 +662,7 @@ function copySelection() {
     rotation: panel.rotation,
     dx: panel.x - minX,
     dy: panel.y - minY,
+    pushOut: panel.pushOut,
   }));
 }
 
@@ -665,7 +680,7 @@ function pasteClipboard() {
   const originY = snapToIncrement(anchor.y, HALF_PANEL);
 
   const pasted = state.clipboard.map((item) =>
-    createPanel(item.type, originX + item.dx, originY + item.dy, item.rotation)
+    createPanel(item.type, originX + item.dx, originY + item.dy, item.rotation, item.pushOut)
   );
   state.panels.push(...pasted);
   snapPanelGroup(pasted.map((panel) => panel.id), PLACEMENT_LOCK_DISTANCE);
@@ -863,10 +878,29 @@ function replaceSelectedPanelType(type) {
   pushHistory();
   selectedPanels.forEach((panel) => {
     panel.type = type;
+    if (type !== "MG9") panel.pushOut = false;
   });
   applyAvailability();
   computeConnections();
   render();
+}
+
+// Push-Out is a display/labelling flag only: it never changes panel.type, so
+// it automatically stays included in every existing MG9 count, stock check,
+// and orientation calculation without any further wiring.
+function togglePushOut() {
+  const selectedMG9 = getSelectedPanels().filter((panel) => panel.type === "MG9");
+  if (!selectedMG9.length) return;
+  pushHistory();
+  const allPushOut = selectedMG9.every((panel) => panel.pushOut);
+  selectedMG9.forEach((panel) => {
+    panel.pushOut = !allPushOut;
+  });
+  render();
+}
+
+function getPushOutCount() {
+  return state.panels.filter((panel) => panel.type === "MG9" && panel.pushOut).length;
 }
 
 function renderReplaceTypeLibrary() {
@@ -897,19 +931,21 @@ function buildPanelChildren(panel, options = {}) {
   const type = PANEL_TYPES[panel.type];
   const geometry = getGeometry(panel);
   const fragment = document.createDocumentFragment();
+  const isPushOut = panel.type === "MG9" && Boolean(panel.pushOut);
+  const fillColor = isPushOut ? PUSH_OUT_COLOR : type.color;
 
   if (type.shapeKind === "sector") {
     const path = document.createElementNS(SVG_NS, "path");
     path.setAttribute("d", geometry.path);
     if (panel.rotation) path.setAttribute("transform", `rotate(${panel.rotation})`);
     path.setAttribute("class", "panel-shape");
-    path.setAttribute("fill", type.color);
+    path.setAttribute("fill", fillColor);
     fragment.appendChild(path);
   } else {
     const polygon = document.createElementNS(SVG_NS, "polygon");
     polygon.setAttribute("points", geometry.points.map((point) => `${point.x},${point.y}`).join(" "));
     polygon.setAttribute("class", "panel-shape");
-    polygon.setAttribute("fill", type.color);
+    polygon.setAttribute("fill", fillColor);
     fragment.appendChild(polygon);
   }
 
@@ -917,8 +953,14 @@ function buildPanelChildren(panel, options = {}) {
   text.setAttribute("x", geometry.labelOffset.x);
   text.setAttribute("y", geometry.labelOffset.y);
   text.setAttribute("class", "panel-label");
-  text.textContent = panel.type;
+  text.textContent = isPushOut ? PUSH_OUT_LABEL : panel.type;
   fragment.appendChild(text);
+
+  if (isPushOut) {
+    const title = document.createElementNS(SVG_NS, "title");
+    title.textContent = "Push-Out panel (MG9)";
+    fragment.appendChild(title);
+  }
 
   const connected = connectedSet || state.connectionMap.get(panel.id)?.anchorIndices || new Set();
   geometry.anchors.forEach((anchor, index) => {
@@ -941,6 +983,7 @@ function panelClasses(panel) {
     state.selectedIds.includes(panel.id) && panel.id !== state.selectedId ? "multi-selected" : "",
     panel.available === false ? "unavailable" : "",
     !isConnected ? "disconnected" : "",
+    panel.type === "MG9" && panel.pushOut ? "push-out" : "",
   ]
     .filter(Boolean)
     .join(" ");
@@ -1152,18 +1195,20 @@ function getLayoutBounds() {
   };
 }
 
-function updateCanvasView(bounds) {
-  if (state.drag || (state.manualViewLocked && state.panels.length)) {
-    els.canvas.setAttribute("viewBox", state.currentViewBox);
-    return;
-  }
-  const width = Math.max(bounds.width + CANVAS_PADDING * 2, 2400);
-  const height = Math.max(bounds.height + CANVAS_PADDING * 2, 1600);
-  const x = bounds.hasPanels ? bounds.minX - CANVAS_PADDING : 0;
-  const y = bounds.hasPanels ? bounds.minY - CANVAS_PADDING : 0;
+function parseViewBox(viewBoxStr) {
+  const [x, y, width, height] = viewBoxStr.split(" ").map(Number);
+  return { x, y, width, height };
+}
 
-  state.currentViewBox = `${x} ${y} ${width} ${height}`;
-  els.canvas.setAttribute("viewBox", state.currentViewBox);
+function unionRect(a, b) {
+  const minX = Math.min(a.x, b.x);
+  const minY = Math.min(a.y, b.y);
+  const maxX = Math.max(a.x + a.width, b.x + b.width);
+  const maxY = Math.max(a.y + a.height, b.y + b.height);
+  return { x: minX, y: minY, width: maxX - minX, height: maxY - minY };
+}
+
+function setCanvasExtent(x, y, width, height) {
   els.canvasBackground.setAttribute("x", x);
   els.canvasBackground.setAttribute("y", y);
   els.canvasBackground.setAttribute("width", width);
@@ -1176,6 +1221,47 @@ function updateCanvasView(bounds) {
   els.canvasSubgrid.setAttribute("y", y);
   els.canvasSubgrid.setAttribute("width", width);
   els.canvasSubgrid.setAttribute("height", height);
+}
+
+function updateCanvasView(bounds) {
+  if (state.drag) {
+    els.canvas.setAttribute("viewBox", state.currentViewBox);
+    return;
+  }
+
+  if (state.manualViewLocked && state.panels.length) {
+    // Keep the user's current pan/zoom framing (don't recenter/re-fit), but
+    // grow the canvas — never shrink it — so a panel placed outside the
+    // current view is always pulled into the visible/exportable area.
+    const current = parseViewBox(state.currentViewBox);
+    const required = {
+      x: bounds.minX - CANVAS_PADDING,
+      y: bounds.minY - CANVAS_PADDING,
+      width: bounds.width + CANVAS_PADDING * 2,
+      height: bounds.height + CANVAS_PADDING * 2,
+    };
+    const expanded = unionRect(current, required);
+    if (
+      expanded.x !== current.x ||
+      expanded.y !== current.y ||
+      expanded.width !== current.width ||
+      expanded.height !== current.height
+    ) {
+      state.currentViewBox = `${expanded.x} ${expanded.y} ${expanded.width} ${expanded.height}`;
+      setCanvasExtent(expanded.x, expanded.y, expanded.width, expanded.height);
+    }
+    els.canvas.setAttribute("viewBox", state.currentViewBox);
+    return;
+  }
+
+  const width = Math.max(bounds.width + CANVAS_PADDING * 2, 2400);
+  const height = Math.max(bounds.height + CANVAS_PADDING * 2, 1600);
+  const x = bounds.hasPanels ? bounds.minX - CANVAS_PADDING : 0;
+  const y = bounds.hasPanels ? bounds.minY - CANVAS_PADDING : 0;
+
+  state.currentViewBox = `${x} ${y} ${width} ${height}`;
+  els.canvas.setAttribute("viewBox", state.currentViewBox);
+  setCanvasExtent(x, y, width, height);
 }
 
 function renderGuides() {
@@ -1254,10 +1340,24 @@ function syncRotationInput(selectedPanels) {
   els.rotationInput.value = Math.round(selectedPanels[0].rotation) % 360;
 }
 
+function syncPushOutButton(selectedPanels) {
+  if (!els.pushOutBtn) return;
+  const selectedMG9 = selectedPanels.filter((panel) => panel.type === "MG9");
+  if (!selectedMG9.length) {
+    els.pushOutBtn.disabled = true;
+    els.pushOutBtn.textContent = "Mark as Push-Out";
+    return;
+  }
+  els.pushOutBtn.disabled = false;
+  const allPushOut = selectedMG9.every((panel) => panel.pushOut);
+  els.pushOutBtn.textContent = allPushOut ? "Revert to Standard MG9" : "Mark as Push-Out";
+}
+
 function renderSelectedMeta() {
   const selectedPanels = getSelectedPanels();
   const panel = getPanelById(state.selectedId);
   syncRotationInput(selectedPanels);
+  syncPushOutButton(selectedPanels);
   if (!panel || !selectedPanels.length) {
     els.selectedMeta.classList.add("empty");
     els.selectedMeta.textContent = state.placement.active
@@ -1267,10 +1367,13 @@ function renderSelectedMeta() {
   }
 
   if (selectedPanels.length > 1) {
+    const pushOutSelected = selectedPanels.filter((item) => item.type === "MG9" && item.pushOut).length;
     els.selectedMeta.classList.remove("empty");
     els.selectedMeta.innerHTML = `
       <strong>${selectedPanels.length} panels selected</strong><br />
-      Move, rotate, duplicate, or delete them as one group.
+      Move, rotate, duplicate, or delete them as one group.${
+        pushOutSelected ? `<br />Push-Out panels in selection: ${pushOutSelected}` : ""
+      }
     `;
     return;
   }
@@ -1278,14 +1381,15 @@ function renderSelectedMeta() {
   const type = PANEL_TYPES[panel.type];
   const connectionState = isPanelConnected(panel.id) ? "Connected" : "Needs connection";
   const stockState = panel.available === false ? "Unavailable" : "Available";
+  const isPushOut = panel.type === "MG9" && Boolean(panel.pushOut);
   els.selectedMeta.classList.remove("empty");
   els.selectedMeta.innerHTML = `
-    <strong>${type.name}</strong><br />
+    <strong>${type.name}${isPushOut ? " — Push-Out" : ""}</strong><br />
     Size: ${type.widthMm} x ${type.heightMm} mm<br />
     Rotation: ${panel.rotation} deg<br />
     Position: ${Math.round(unitsToMm(panel.x))} mm, ${Math.round(unitsToMm(panel.y))} mm<br />
     Status: ${connectionState}<br />
-    Stock: ${stockState}
+    Stock: ${stockState}${panel.type === "MG9" ? `<br />Push-Out: ${isPushOut ? "Yes" : "No"}` : ""}
   `;
 }
 
@@ -2209,6 +2313,7 @@ function serializeProject() {
       x: panel.x,
       y: panel.y,
       rotation: panel.rotation,
+      pushOut: Boolean(panel.pushOut),
     })),
     textLayout: {
       text: els.textInput.value,
@@ -2258,7 +2363,13 @@ function restoreProject(project) {
 
   (project.panels || []).forEach((panel) => {
     state.panels.push(
-      createPanel(panel.type, Number(panel.x) || 500, Number(panel.y) || 500, Number(panel.rotation) || 0)
+      createPanel(
+        panel.type,
+        Number(panel.x) || 500,
+        Number(panel.y) || 500,
+        Number(panel.rotation) || 0,
+        Boolean(panel.pushOut)
+      )
     );
   });
 
@@ -2303,6 +2414,13 @@ function openProjectFile(event) {
 // background" export) and inline the styling the raster needs.
 async function rasterizeLayout({ transparent = false, panelColor = null } = {}) {
   const clone = els.canvas.cloneNode(true);
+  // The live canvas carries the on-screen zoom as an inline CSS transform
+  // (see updateZoom). cloneNode copies that verbatim, which would bake the
+  // current zoom level into the exported raster and crop it to whatever was
+  // on screen. Exports must always cover the full layout bounds regardless
+  // of zoom/pan, so strip it before rasterizing.
+  clone.style.transform = "";
+  clone.style.transformOrigin = "";
   clone.querySelector("#canvasPreview")?.replaceChildren();
   clone.querySelector("#canvasGuides")?.replaceChildren();
   clone.querySelector("#canvasMarquee")?.replaceChildren();
@@ -2383,25 +2501,55 @@ async function saveToPdf() {
   const widthText = bounds.hasPanels ? mmToMetersText(unitsToMm(bounds.width)) : "0.00 m";
   const heightText = bounds.hasPanels ? mmToMetersText(unitsToMm(bounds.height)) : "0.00 m";
   const used = getUsedOrientationCounts();
+  const pushOutCount = getPushOutCount();
   const orientationLine = (counts) =>
     `LU ${counts.LU}   LD ${counts.LD}   RU ${counts.RU}   RD ${counts.RD}`;
 
+  let cursorY = headerY;
   pdf.setFont("helvetica", "bold");
   pdf.setFontSize(18);
-  pdf.text(projectName, margin, headerY);
+  pdf.text(projectName, margin, cursorY);
+  cursorY += 16;
   pdf.setFont("helvetica", "normal");
   pdf.setFontSize(10);
-  pdf.text(`Version v${APP_VERSION}`, margin, headerY + 16);
-  pdf.text(`Layout width: ${widthText}`, margin, headerY + 34);
-  pdf.text(`Layout height: ${heightText}`, margin, headerY + 48);
+  pdf.text(`Version v${APP_VERSION}`, margin, cursorY);
+  cursorY += 18;
+  pdf.text(`Layout width: ${widthText}`, margin, cursorY);
+  cursorY += 14;
+  pdf.text(`Layout height: ${heightText}`, margin, cursorY);
+  cursorY += 18;
   pdf.setFont("helvetica", "bold");
-  pdf.text(`Total panels used: ${state.panels.length}`, margin, headerY + 66);
+  pdf.text(`Total panels used: ${state.panels.length}`, margin, cursorY);
+  cursorY += 16;
   pdf.setFont("helvetica", "normal");
-  pdf.text(`MG9 squares: ${used.MG9}`, margin, headerY + 82);
-  pdf.text(`MG12 triangles  -  ${orientationLine(used.MG12)}`, margin, headerY + 96);
-  pdf.text(`MG13 quarter-circles  -  ${orientationLine(used.MG13)}`, margin, headerY + 110);
+  pdf.text(
+    `MG9 squares: ${used.MG9}${pushOutCount ? ` (including ${pushOutCount} Push-Out)` : ""}`,
+    margin,
+    cursorY
+  );
+  cursorY += 14;
+  pdf.text(`MG12 triangles  -  ${orientationLine(used.MG12)}`, margin, cursorY);
+  cursorY += 14;
+  pdf.text(`MG13 quarter-circles  -  ${orientationLine(used.MG13)}`, margin, cursorY);
+  cursorY += 18;
 
-  const imageTop = headerY + 128;
+  if (pushOutCount) {
+    const [r, g, b] = hexToRgb(PUSH_OUT_COLOR);
+    pdf.setFillColor(r, g, b);
+    pdf.setDrawColor(74, 42, 134);
+    pdf.rect(margin, cursorY - 9, 12, 12, "FD");
+    pdf.setFont("helvetica", "bold");
+    pdf.text("Legend:", margin + 18, cursorY);
+    pdf.setFont("helvetica", "normal");
+    pdf.text(
+      `Violet panel labelled "PO" = MG9 Push-Out panel (${pushOutCount} in this layout)`,
+      margin + 64,
+      cursorY
+    );
+    cursorY += 20;
+  }
+
+  const imageTop = cursorY + 10;
   const availableWidth = pageWidth - margin * 2;
   const availableHeight = pageHeight - imageTop - margin;
   const imageRatio = canvas.width / canvas.height;
@@ -2487,6 +2635,7 @@ function wireEvents() {
   els.rotateFineBtn?.addEventListener("click", () => rotateSelectedPanel(ROTATION_STEP_FINE));
   els.rotationInput?.addEventListener("change", (event) => setSelectedRotation(event.target.value));
   els.duplicateBtn.addEventListener("click", duplicateSelectedPanel);
+  els.pushOutBtn?.addEventListener("click", togglePushOut);
   els.copyBtn?.addEventListener("click", copySelection);
   els.pasteBtn?.addEventListener("click", pasteClipboard);
   els.deleteBtn.addEventListener("click", removeSelectedPanel);
