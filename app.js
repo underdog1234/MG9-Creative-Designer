@@ -1,5 +1,5 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
-const APP_VERSION = "1.6.1";
+const APP_VERSION = "1.7.0";
 const MM_TO_UNITS = 0.25;
 const PANEL_SIZE_MM = 500;
 const PANEL_SIZE_UNITS = PANEL_SIZE_MM * MM_TO_UNITS;
@@ -707,6 +707,10 @@ function rotateSelectedPanel(step = ROTATION_STEP) {
   selectedPanels.forEach((selected) => {
     selected.rotation = (((selected.rotation + step) % 360) + 360) % 360;
   });
+  // Rotating moves a panel's connectors, which can turn a flush join with a
+  // neighbour into a small gap; pull it back to exact alignment if one is
+  // still in reach so "connected" always means zero-gap.
+  selectedPanels.forEach((selected) => snapPanel(selected, SNAP_DISTANCE_UNITS));
   applyAvailability();
   computeConnections();
   render();
@@ -721,6 +725,7 @@ function setSelectedRotation(angle) {
   selectedPanels.forEach((selected) => {
     selected.rotation = normalized;
   });
+  selectedPanels.forEach((selected) => snapPanel(selected, SNAP_DISTANCE_UNITS));
   applyAvailability();
   computeConnections();
   render();
@@ -914,6 +919,10 @@ function replaceSelectedPanelType(type) {
     panel.type = type;
     if (type !== "MG9") panel.pushOut = false;
   });
+  // Different panel shapes have different connector layouts, so swapping
+  // type can turn a flush join into a small gap; re-settle against any
+  // neighbour still in reach.
+  selectedPanels.forEach((panel) => snapPanel(panel, SNAP_DISTANCE_UNITS));
   applyAvailability();
   computeConnections();
   render();
@@ -1833,6 +1842,82 @@ function snapPanelGroup(panelIds, threshold = SNAP_DISTANCE_UNITS) {
   }
 }
 
+// "Connected" (the green anchor / All-connected status) is decided by anchors
+// being within SNAP_DISTANCE_UNITS of each other, but proximity alone doesn't
+// move anything -- a panel can show as connected while still sitting a few
+// units away from its neighbour, i.e. joined-but-with-a-gap. This pass closes
+// that gap for the whole layout: any panel whose anchor is within tolerance
+// of another panel's anchor (but not already exactly on it) gets nudged by
+// the exact vector needed to make them flush, so "connected" and "flush"
+// become the same thing everywhere, not just right after a drag.
+//
+// The spatial hash is built incrementally as panels are processed (not
+// snapshotted up front), so each panel only settles against neighbours'
+// already-updated positions. That matters: snapshotting positions for the
+// whole pass and moving everyone from that stale snapshot lets two mutually
+// touching panels each try to close the *same* gap independently, doubling
+// the correction and overshooting into an overlap instead of a flush join.
+// Settling one side at a time against live positions closes each gap exactly
+// once. A few passes let chains of near-touching panels fully settle.
+function settleAllPanelsFlush(threshold = SNAP_DISTANCE_UNITS) {
+  const MAX_PASSES = 4;
+  let anyMoved = false;
+
+  for (let pass = 0; pass < MAX_PASSES; pass += 1) {
+    const buckets = new Map();
+    const insertAnchor = (anchor) => {
+      const key = `${Math.floor(anchor.x / CONNECTION_CELL)}:${Math.floor(anchor.y / CONNECTION_CELL)}`;
+      let bucket = buckets.get(key);
+      if (!bucket) {
+        bucket = [];
+        buckets.set(key, bucket);
+      }
+      bucket.push(anchor);
+    };
+
+    let movedThisPass = false;
+
+    state.panels.forEach((panel) => {
+      let bestMatch = null;
+
+      getGlobalAnchors(panel).forEach((anchor) => {
+        const cellX = Math.floor(anchor.x / CONNECTION_CELL);
+        const cellY = Math.floor(anchor.y / CONNECTION_CELL);
+        for (let gx = cellX - 1; gx <= cellX + 1; gx += 1) {
+          for (let gy = cellY - 1; gy <= cellY + 1; gy += 1) {
+            const bucket = buckets.get(`${gx}:${gy}`);
+            if (!bucket) continue;
+            for (const other of bucket) {
+              if (other.panelId === panel.id) continue;
+              const dx = other.x - anchor.x;
+              const dy = other.y - anchor.y;
+              const distance = Math.hypot(dx, dy);
+              if (distance > 0 && distance <= threshold && (!bestMatch || distance < bestMatch.distance)) {
+                bestMatch = { dx, dy, distance };
+              }
+            }
+          }
+        }
+      });
+
+      if (bestMatch) {
+        panel.x += bestMatch.dx;
+        panel.y += bestMatch.dy;
+        movedThisPass = true;
+        anyMoved = true;
+      }
+
+      // Insert this panel's final-for-now anchors so panels processed later
+      // in this same pass settle against where it actually ended up.
+      getGlobalAnchors(panel).forEach(insertAnchor);
+    });
+
+    if (!movedThisPass) break;
+  }
+
+  return anyMoved;
+}
+
 function isLayoutValid() {
   if (state.panels.length <= 1) return true;
   return state.panels.every((panel) => isPanelConnected(panel.id));
@@ -2491,6 +2576,10 @@ function restoreProject(project) {
   state.selectedIds = [];
   state.manualViewLocked = false;
   resetPlacement();
+  // Loaded positions come straight from the file with no snapping applied,
+  // so near-but-not-exact joins (rounding, hand-edited coordinates, etc.)
+  // would otherwise show as "connected" while still having a visible gap.
+  settleAllPanelsFlush();
   applyAvailability();
   computeConnections();
   render();

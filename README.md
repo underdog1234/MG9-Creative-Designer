@@ -2,6 +2,10 @@
 
 Small browser-based planning tool for YES TECH `MG9`, `MG12`, and `MG13` LED panels.
 
+## What's New in v1.7.0
+
+- Reworked panel snapping so a "connected" join is always a true zero-gap join, not just close enough to look connected. Rotating a panel, replacing its type, and opening a saved project (which loads raw coordinates with no snapping) could each leave a small visible gap between panels that still showed as "Connected" — all three now automatically settle back to an exact flush join with any neighbour still in reach, using the same fast spatial-hash approach as connection detection so it stays quick even on large saved layouts
+
 ## What's New in v1.6.1
 
 - Fixed the width/height dimension-line arrowheads: the arrows nearest the top-left corner of the layout (the start of each measurement line) were pointing inward instead of outward, because the shared SVG arrow marker didn't reverse orientation for the start of a line. Both dimension lines now point outward at both ends, as intended
