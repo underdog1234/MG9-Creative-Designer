@@ -1,5 +1,5 @@
 const SVG_NS = "http://www.w3.org/2000/svg";
-const APP_VERSION = "1.7.0";
+const APP_VERSION = "1.7.1";
 const MM_TO_UNITS = 0.25;
 const PANEL_SIZE_MM = 500;
 const PANEL_SIZE_UNITS = PANEL_SIZE_MM * MM_TO_UNITS;
@@ -9,6 +9,11 @@ const PLACEMENT_LOCK_DISTANCE = 52;
 const ROTATION_STEP = 90;
 const ROTATION_STEP_FINE = 45;
 const CANVAS_PADDING = 180;
+// Native LED pixel resolution per panel edge. A panel is PANEL_SIZE_MM (500mm)
+// physically but PANEL_PIXEL_SIZE pixels of actual LEDs, so raster exports must
+// scale by pixels-per-unit derived from this, not by an arbitrary on-screen size.
+const PANEL_PIXEL_SIZE = 168;
+const EXPORT_PIXELS_PER_UNIT = PANEL_PIXEL_SIZE / PANEL_SIZE_UNITS;
 const AUTO_REFRESH_DELAY_MS = 120;
 const MAX_GRID_DIMENSION = 60;
 const MAX_GRID_CELLS = 1200;
@@ -2637,10 +2642,15 @@ async function rasterizeLayout({ transparent = false, panelColor = null } = {}) 
   if (panelColor) clone.querySelectorAll(".panel-label").forEach((label) => label.remove());
 
   clone.setAttribute("xmlns", SVG_NS);
-  const viewBox = els.canvas.getAttribute("viewBox") || "0 0 2400 1600";
-  const [, , widthStr, heightStr] = viewBox.split(" ");
-  const svgWidth = Number(widthStr) || 2400;
-  const svgHeight = Number(heightStr) || 1600;
+  // Crop tightly to the actual panel layout instead of the full on-screen
+  // canvas viewBox, which includes empty grid space around the layout, and
+  // size the raster from the LED layout's real pixel resolution (each panel
+  // contributes exactly PANEL_PIXEL_SIZE x PANEL_PIXEL_SIZE pixels) rather
+  // than an arbitrary on-screen scale.
+  const bounds = getLayoutBounds();
+  const svgWidth = bounds.width;
+  const svgHeight = bounds.height;
+  clone.setAttribute("viewBox", `${bounds.minX} ${bounds.minY} ${svgWidth} ${svgHeight}`);
   clone.setAttribute("width", String(svgWidth));
   clone.setAttribute("height", String(svgHeight));
 
@@ -2656,9 +2666,8 @@ async function rasterizeLayout({ transparent = false, panelColor = null } = {}) 
     });
 
     const canvas = document.createElement("canvas");
-    const scale = Math.min(1.6, 2200 / Math.max(svgWidth, svgHeight));
-    canvas.width = Math.max(1, Math.round(svgWidth * scale));
-    canvas.height = Math.max(1, Math.round(svgHeight * scale));
+    canvas.width = Math.max(1, Math.round(svgWidth * EXPORT_PIXELS_PER_UNIT));
+    canvas.height = Math.max(1, Math.round(svgHeight * EXPORT_PIXELS_PER_UNIT));
     const context = canvas.getContext("2d");
     if (!transparent) {
       context.fillStyle = "#ffffff";
